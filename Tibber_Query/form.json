@@ -1,0 +1,427 @@
+{
+    "elements": 
+    [
+        {   "type": "CheckBox",
+            "name": "DemoMode",
+            "caption": "Demo mode (simulate 15-minute data)"
+        },
+        {   "type": "CheckBox",
+        "name": "InstanceActive",
+        "caption": "activate Instance"
+        },
+
+        {
+            "type": "ValidationTextBox",
+            "name": "Token",
+            "caption": "User-Token"
+
+        },
+        {
+            "type": "Select",
+            "name": "Home_ID",
+            "caption": "Select Home",
+            "visible": false,
+            "options": [ {"caption" : "Select Home", "value":"0"} ]
+        },
+        {   
+            "type": "ExpansionPanel",
+            "caption": "Price Data -> Variable Settings",
+            "expanded": false,
+            "items": [
+                    {   "type": "CheckBox",
+                        "name": "Price_log",
+                        "caption": "Log price data variable",
+                        "visible": true,
+                        "enabled": true
+                    },            
+                    {   "type": "CheckBox",
+                        "name": "Price_Variables",
+                        "caption": "Price - create variables per hour (24 for current day & 24 for day ahead day)",
+                        "visible": true
+                    },
+                    {   "type": "CheckBox",
+                        "name": "Statistics",
+                        "caption": "create statistics, like min/max price, quantity of price level etc and activate logging",
+                        "visible": true
+                    },
+                    {
+                        "type": "CheckBox",
+                        "name": "Ahead_Price_Data_bool",
+                        "caption": "Create price ahead variable for energy optimizer",
+                        "visible": true
+                    }
+                ]
+        },
+        { 
+            "type": "Label", 
+            "caption": "advanced HTML settings" 
+        },
+
+        {
+            "type": "ExpansionPanel",
+            "caption": "Colorsettings",
+            "expanded": false,
+            "items": [
+                    {
+                        "type": "SelectColor",
+                        "allowTransparent": "false",
+                        "name": "HTML_FontColorHour",
+                        "caption": "Fontcolor actually hour"
+                    },
+                    {
+                        "type": "SelectColor",
+                        "allowTransparent": "false",
+                        "name": "HTML_BGColorHour",
+                        "caption": "backgroundcolor of the actually hour"
+                    },
+                    {
+                        "type": "CheckBox",
+                        "name": "HTML_FontColorHourDefaultSymcon",
+                        "caption": "Use own Fontcolor for Hour instead from Symcon Theme",
+                        "visible": true,
+                        "onChange":"IPS_RequestAction($id, 'ShowDefaultFontColorHour', $HTML_FontColorHourDefaultSymcon);"
+                    },
+                    {
+                        "type": "SelectColor",
+                        "allowTransparent": "false",
+                        "name": "HTML_FontColorHourDefault",
+                        "caption": "default Fontcolor hour",
+                        "visible": false
+                    }                    
+                ]
+        },
+
+        {
+            "type": "ExpansionPanel",
+            "caption": "Barsettings",
+            "expanded": false,
+            "items": [
+                
+                    {   "type": "NumberSpinner",
+                        "name": "HTML_Default_HourAhead",
+                        "caption": "Set how many hours you want to see, Min. 12 and Max. 48",
+                        "width":"450px",
+                        "digits": 0, 
+                        "minimum": 12,
+                        "maximum": 48
+                    },
+                    {   "type": "NumberSpinner",
+                        "name": "HTML_Scale",
+                        "caption": "set the scale of the bar, values between 1-10 are allowed",
+                        "width":"400px",
+                        "digits": 0, 
+                        "minimum": 1,
+                        "maximum": 10
+                    },
+                    {   "type": "NumberSpinner",
+                        "name": "HTML_BorderRadius",
+                        "caption": "set the border radius of the bars",
+                        "digits": 0, 
+                        "minimum": 0,
+                        "maximum": 50.0
+                    },
+                    { 
+                        "type": "Label", 
+                        "caption": "gradient for the bars" 
+                    },
+                    { 
+                        "type": "RowLayout",
+                        "items": [
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGCstartG",
+                                "caption": "start gradient"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGCstopG",
+                                "caption": "stop gradient"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "RowLayout",
+                        "items": [
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGCstartG_Current",
+                                "caption": "start gradient (current bar)"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGCstopG_Current",
+                                "caption": "stop gradient (current bar)"
+                            }
+                        ]
+                    },
+                    {   "type": "CheckBox",
+                        "name": "HTML_MarkPriceLevel",
+                        "caption": "show Tibber price level indicator",
+                        "onChange": "IPS_RequestAction($id, 'ShowPriceLevelEnhanced', $HTML_MarkPriceLevel);",
+                        "visible": true
+                    },
+                    { 
+                        "type": "RowLayout",
+                        "name": "ShowPriceLevelEnhanced",
+                        "visible": false,
+                        "items": [
+                            {   "type": "NumberSpinner",
+                                "name": "HTML_PriceLevelThick",
+                                "caption": "thickness of the marker in px",
+                                "digits": 0, 
+                                "minimum": 1,
+                                "maximum": 10
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGColorPriceVC",
+                                "caption": "Color for Level very cheap"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGColorPriceC",
+                                "caption": "Color for Level cheap"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGColorPriceN",
+                                "caption": "Color for Level normal"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGColorPriceE",
+                                "caption": "Color for Level expensive"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGColorPriceVE",
+                                "caption": "Color for Level very expensive"
+                            }
+                        ]
+                    },
+                    { 
+                        "type": "Label", 
+                        "caption": "display of prices in the bar" 
+                    },
+                    { 
+                        "type": "RowLayout",
+                        "items": [
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_FontColorBars",
+                                "caption": "Fontcolor bars"
+                            },
+                            {
+                                "type": "NumberSpinner",
+                                "name": "HTML_Bar_Price_Round",
+                                "caption": "Number of decimal places",
+                                "minimum": 0,
+                                "maximum": 2
+                            },
+                            {
+                                "type": "CheckBox",
+                                "name": "HTML_Bar_Price_vis_ct",
+                                "caption": "show ct suffix"
+                            },
+                            {
+                                "type": "CheckBox",
+                                "name": "HTML_Bar_Show_Prices",
+                                "caption": "show prices in bars"
+                            },
+                            {
+                                "type": "CheckBox",
+                                "name": "HTML_Show_Grid",
+                                "caption": "show gridlines and prices"
+                            }
+                        ]
+                    }                                        
+                ]
+        },
+
+        {
+            "type": "ExpansionPanel",
+            "caption": "Fontsettings",
+            "expanded": false,
+            "items": [
+                { 
+                    "type": "Label", 
+                    "caption": "Fontsize bars" 
+                },
+                { 
+                    "type": "RowLayout",
+                    "items": [
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMinB",
+                        "caption": "set minimum fontsize in px",
+                        "digits": 0,
+                        "minimum": 1,
+                        "maximum": 15,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeDefB",
+                        "width":"400px",
+                        "caption": "set default fontsize in vw. 1vw corresponds to 1% of the width of the viewport",
+                        "digits": 0,
+                        "minimum": 0,
+                        "maximum": 5,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMaxB",
+                        "caption": "set maximum fontsize in px",
+                        "digits": 0,
+                        "minimum": 16,
+                        "maximum": 30,
+                        "visible": true
+                    }
+                    ]
+                },
+                { 
+                    "type": "Label", 
+                    "caption": "Fontsize hours" 
+                },
+                {
+                    "type": "CheckBox",
+                    "name": "HTML_Hour_WriteMode",
+                    "caption": "rotate the hour text by 180 degrees"
+                },
+                { 
+                    "type": "RowLayout",
+                    "items": [
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMinH",
+                        "caption": "set minimum fontsize in px",
+                        "digits": 0,
+                        "minimum": 1,
+                        "maximum": 15,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeDefH",
+                        "width":"400px",
+                        "caption": "set default fontsize in vw. 1vw corresponds to 1% of the width of the viewport",
+                        "digits": 0,
+                        "minimum": 0,
+                        "maximum": 5,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMaxH",
+                        "caption": "set maximum fontsize in px",
+                        "digits": 0,
+                        "minimum": 16,
+                        "maximum": 30,
+                        "visible": true
+                    }
+                    ]
+                },
+                { 
+                    "type": "Label", 
+                    "caption": "Fontsize prices" 
+                },
+                { 
+                    "type": "RowLayout",
+                    "items": [
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMinP",
+                        "caption": "set minimum fontsize in px",
+                        "digits": 0,
+                        "minimum": 1,
+                        "maximum": 15,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeDefP",
+                        "width":"400px",
+                        "caption": "set default fontsize in vw. 1vw corresponds to 1% of the width of the viewport",
+                        "digits": 0,
+                        "minimum": 0,
+                        "maximum": 5,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMaxP",
+                        "caption": "set maximum fontsize in px",
+                        "digits": 0,
+                        "minimum": 16,
+                        "maximum": 30,
+                        "visible": true
+                    }
+                    ]
+                }
+
+                ]
+        }
+           
+    ],
+    "actions": [
+       
+        {
+            "type": "Button",
+            "label": "Retrieve price data",
+            "onClick": "TIBV2_GetPriceData($id);"
+          },
+          {
+            "type": "Button",
+            "label": "Retrieve Home ID",
+            "onClick": "IPS_RequestAction($id, 'GetHomesData', '');"
+          },
+          {
+            "type": "Button",
+            "label": "Reset HTML settings",
+            "onClick": "IPS_RequestAction($id, 'ResetHTML', '');"
+          },
+          {
+            "type": "Button",
+            "label": "Reload visualization",
+            "onClick": "IPS_RequestAction($id, 'reload', '');"
+          }
+    ],
+    "status": [
+        {
+            "code": 201,
+            "icon": "error",
+            "caption": "Please insert Token"
+          },
+          {
+            "code": 202,
+            "icon": "error",
+            "caption": "Home ID not available or selected"
+          },
+          {
+            "code": 203,
+            "icon": "error",
+            "caption": "no contract available, we receive no data from tibber"
+          },
+          {
+            "code": 205,
+            "icon": "error",
+            "caption": "Too many requests. Your IP is now temporarily banned for calling API for a few minutes."
+          },
+          {
+            "code": 210,
+            "icon": "error",
+            "caption": "Token invalid"
+          }
+    ]
+}
