@@ -2,6 +2,10 @@
     "elements": 
     [
         {   "type": "CheckBox",
+            "name": "Enable_15m",
+            "caption": "Enable 15-minute prices"
+        },
+        {   "type": "CheckBox",
             "name": "DemoMode",
             "caption": "Demo mode (simulate 15-minute data)"
         },
@@ -29,14 +33,13 @@
             "expanded": false,
             "items": [
                     {   "type": "CheckBox",
-                        "name": "Price_log",
-                        "caption": "Log price data variable",
-                        "visible": true,
-                        "enabled": true
-                    },            
-                    {   "type": "CheckBox",
                         "name": "Price_Variables",
                         "caption": "Price - create variables per hour (24 for current day & 24 for day ahead day)",
+                        "visible": true
+                    },
+                    {   "type": "CheckBox",
+                        "name": "Price_Variables_15m",
+                        "caption": "Price - create variables per 15 minutes (96 for current day & 96 for day ahead day)",
                         "visible": true
                     },
                     {   "type": "CheckBox",
@@ -47,7 +50,7 @@
                     {
                         "type": "CheckBox",
                         "name": "Ahead_Price_Data_bool",
-                        "caption": "Create price ahead variable for energy optimizer",
+                        "caption": "Create variables for energy optimizer (hourly + 15-minute)",
                         "visible": true
                     }
                 ]

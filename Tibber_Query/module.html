@@ -133,6 +133,7 @@
             font-size: var(--FontSizeBars);
             text-align: center;
             white-space: nowrap;
+            padding-bottom: 5px;
         }
         /* Horizontale Rasterlinien (max + alle 5ct) im Overlay */
         #avgoverlay .gridline {
@@ -152,7 +153,7 @@
         #avgoverlay .gridprice {
             position: absolute;
             left: 0;
-            width: calc(var(--LeftGutter) - 2px);
+            width: calc(var(--LeftGutter) - 10px);
             padding-right: 2px;
             text-align: right;
             transform: translateY(-50%);
@@ -180,9 +181,9 @@
         </div>
         <div id="prices">  
             <span>Aktuell: <span id="price_cur"></span></span>
-            <span style="color: green;">&nbsp;&nbsp;&nbsp;&darr; <span id="price_min">&nbsp;ct</span></span>
-            <span style="color: red;">&nbsp;&nbsp;&nbsp;&uarr; <span id="price_max">&nbsp;ct</span></span>
-            <span>&nbsp;&nbsp;&nbsp;&Oslash;<span id="price_avg">&nbsp;ct</span></span>
+            <span style="color: green;">&nbsp;&nbsp;&nbsp;&darr; <span id="price_min"></span></span>
+            <span style="color: red;">&nbsp;&nbsp;&nbsp;&uarr; <span id="price_max"></span></span>
+            <span>&nbsp;&nbsp;&nbsp;&Oslash;<span id="price_avg"></span></span>
 
         </div>
     </div>
@@ -218,6 +219,7 @@
         // sichere Defaults, werden durch Messages überschrieben
         let BarPriceRound = 2;
         let VisCent = ' ct';
+        let ShowCtSuffix = true;
         let Scale = 1;
         let UseCurrentColorHour = '#ffffff';
         // Sichtbarkeiten (vom Backend konfigurierbar)
@@ -281,6 +283,12 @@
             const currentHour = new Date().getHours();
             const data = JSON.parse(message);
 
+            // Pre-process suffix toggle so KPIs render correctly in this pass
+            if (Object.prototype.hasOwnProperty.call(data, 'bar_price_vis_ct')) {
+                ShowCtSuffix = !!data['bar_price_vis_ct'];
+                VisCent = ShowCtSuffix ? ' ct\u00A0\u00A0' : '\u00A0\u00A0';
+            }
+
             for (const parameter in data) {
             
             const element = document.getElementById(parameter);
@@ -289,27 +297,26 @@
                 // Abhängig vom Parameter werden allerdings verschiedene Werte angepasst
                 switch (parameter) {
                     case 'price_cur':
-                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                        element.innerHTML = data[parameter] + (ShowCtSuffix ? '&nbsp;ct' : '');
                     break;
                     case 'price_min':
-                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                        element.innerHTML = data[parameter] + (ShowCtSuffix ? '&nbsp;ct' : '');
                     break;
                     case 'price_max':
-                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                        element.innerHTML = data[parameter] + (ShowCtSuffix ? '&nbsp;ct' : '');
                     break;
                     case 'price_avg':
-                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                        element.innerHTML = data[parameter] + (ShowCtSuffix ? '&nbsp;ct' : '');
                     break;
                     case 'bar_price_round':
                         BarPriceRound = data[parameter];
                     break;
                     case 'bar_price_vis_ct':
-                   
-                    VisCent = '&nbsp;&nbsp;';
-                    if(data[parameter] == true )
-                        {
-                            VisCent = ' ct&nbsp;&nbsp;';
-                        }
+                        // toggle for showing 'ct' suffix
+                        ShowCtSuffix = !!data[parameter];
+                        VisCent = ShowCtSuffix ? ' ct&nbsp;&nbsp;' : '&nbsp;&nbsp;';
+                        // Also update overlay labels
+                        window.requestAnimationFrame(rebuildOverlay);
                     break;
                     case 'bar_show_prices':
                         BarShowPrices = !!data[parameter];
@@ -648,7 +655,7 @@
                                     if (isCurrent) {
                                         barindex.classList.add('current-hour');
                                         const pc = document.getElementById('price_cur');
-                                        if (pc) pc.innerHTML = groupAvg.toFixed(2) + ' ct';
+                                        if (pc) pc.innerHTML = groupAvg.toFixed(2) + (ShowCtSuffix ? ' ct' : '');
                                     }
                                 } catch(e) { /* ignore */ }
 
@@ -853,7 +860,7 @@
                         for (const it of labelsToMeasure) {
                             if (Math.abs(it.price - price) < eps) return;
                         }
-                        labelsToMeasure.push({ price, text: price.toFixed(BarPriceRound) + ' ct' });
+                        labelsToMeasure.push({ price, text: price.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
                     }
                     // Von der Nulllinie nach oben (ohne Nulllinie)
                     for (let q = step; q <= lastLocalMax + eps; q += step) { pushUnique(q); }
@@ -972,7 +979,7 @@
                         const y0 = yForPrice(0);
                         const zeroLbl = document.createElement('div');
                         zeroLbl.className = 'gridprice';
-                        zeroLbl.textContent = (0).toFixed(BarPriceRound) + ' ct';
+                        zeroLbl.textContent = (0).toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '');
                         zeroLbl.style.top = y0 + 'px';
                         overlay.appendChild(zeroLbl);
                         // zentrieren und Rand-Clamping
@@ -1018,7 +1025,7 @@
                             } catch(e) { /* ignore */ }
                             value = p;
                         }
-                        label.textContent = prefix + value.toFixed(BarPriceRound) + ' ct';
+                        label.textContent = prefix + value.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '');
                         // Wenn für diese Stunde (alle 4/1 Balken) noch keine Daten existieren: Label abblenden
                         let hourHasDomData = false;
                         try {

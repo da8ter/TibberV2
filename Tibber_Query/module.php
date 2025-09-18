@@ -32,16 +32,16 @@ require_once __DIR__ . '/../libs/functions.php';
 			//Never delete this line!
 			parent::Create();
 
-
-
 			$this->RegisterPropertyBoolean("InstanceActive", true);
 			// Backend-Demo-Schalter
 			$this->RegisterPropertyBoolean("DemoMode", false);
 			$this->RegisterPropertyString("Token", '');
 			$this->RegisterPropertyString("Api", 'https://api.tibber.com/v1-beta/gql');
 			$this->RegisterPropertyString("Home_ID",'0');
-			$this->RegisterPropertyBoolean("Price_log", false);
 			$this->RegisterPropertyBoolean("Price_Variables", false);
+			$this->RegisterPropertyBoolean("Price_Variables_15m", false);
+			// Globaler Schalter: 15-Minuten-Preise aktivieren
+			$this->RegisterPropertyBoolean("Enable_15m", false);
 
 			$this->RegisterPropertyBoolean("Statistics", false);
 			$this->RegisterPropertyBoolean("Ahead_Price_Data_bool", false);
@@ -52,6 +52,8 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterAttributeBoolean("EEX_Received", false);
 			$this->RegisterAttributeString('AVGPrice', '');
 			$this->RegisterAttributeString('Ahead_Price_Data', '');
+			// holds raw quarter-hourly price entries from API when available
+			$this->RegisterAttributeString('Price_Array_15m', '');
 
 			$this->RegisterPropertyInteger("HTML_FontSizeMinB", self::HTML_FontSizeMin);
 			$this->RegisterPropertyInteger("HTML_FontSizeMaxB", self::HTML_FontSizeMax);
@@ -141,7 +143,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				$this->SetStatus(104); // instanz deaktiveren
 			}
 			// Tile Visu update
-			//$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
+			$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
 			$this->Reload();
 
 		}
@@ -152,9 +154,22 @@ require_once __DIR__ . '/../libs/functions.php';
 			{
 				$this->SetStatus(104);
 			}
-			// Build Request Data
-			$request = '{ "query": "{viewer { home(id: \"'. $this->ReadPropertyString('Home_ID') .'\") { currentSubscription { priceInfo { today { total energy tax startsAt level } tomorrow { total energy tax startsAt level }}}}}}"}';
+			// Build Request Data (Resolution abhängig vom globalen 15m-Schalter)
+			$resolution = $this->ReadPropertyBoolean('Enable_15m') ? 'QUARTER_HOURLY' : 'HOURLY';
+			$homeId = $this->ReadPropertyString('Home_ID');
+			$query = 'query { viewer { home(id: "' . $homeId . '") { currentSubscription { priceInfo(resolution: ' . $resolution . ') { today { total energy tax startsAt level } tomorrow { total energy tax startsAt level } } } } } }';
+			$this->SendDebug('GraphQL_Query', $query, 0);
+			$request = json_encode([ 'query' => $query ]);
 			$result = $this->CallTibber($request);
+			// Fallback: falls 15m-Auflösung nicht unterstützt wird oder Query fehlschlägt, erneut mit HOURLY versuchen
+			if (!$result && $resolution === 'QUARTER_HOURLY') {
+				$this->SendDebug(__FUNCTION__, 'Quarter-hourly failed, falling back to HOURLY', 0);
+				$resolutionFB = 'HOURLY';
+				$query = 'query { viewer { home(id: "' . $homeId . '") { currentSubscription { priceInfo(resolution: ' . $resolutionFB . ') { today { total energy tax startsAt level } tomorrow { total energy tax startsAt level } } } } } }';
+				$this->SendDebug('GraphQL_Query', $query, 0);
+				$request = json_encode([ 'query' => $query ]);
+				$result = $this->CallTibber($request);
+			}
 			if (!$result) return;		//Bei Fehler abbrechen
 
 			$this->SendDebug("Price_Result", $result, 0);
@@ -225,37 +240,71 @@ require_once __DIR__ . '/../libs/functions.php';
 			}
 			if ($this->ReadAttributeString("Price_Array") != ''){
 				$prices = json_decode($this->ReadAttributeString("Price_Array"),true);
-
 				
-				$h = date('G');
-				foreach ( $prices as $wa_price ){
-					$hour = substr($wa_price["Ident"],9);
-					$day  = substr($wa_price["Ident"],6,2);
-
-					if ( $hour == $h && $day == 'T0'){
-						$this->SetValue('act_price' , $wa_price["Price"]);	
+				$h = intval(date('G'));
+				$minNow = intval(date('i'));
+				$segNow = intval(floor($minNow / 15)); // 0..3
+				$usedQuarter = false;
+				// Prefer true quarter-hourly price if available and 15m mode is enabled
+				if ($this->ReadPropertyBoolean('Enable_15m')) {
+					$rawStr = $this->ReadAttributeString('Price_Array_15m');
+					if (!empty($rawStr)) {
+						$raw = json_decode($rawStr, true);
+						if (is_array($raw) && count($raw) > 0) {
+							$nowSec = time();
+							foreach ($raw as $row) {
+								$st = isset($row['start']) ? intval($row['start']) : 0;
+								$en = isset($row['end']) ? intval($row['end']) : ($st + 900);
+								if ($nowSec >= $st && $nowSec < $en) {
+									$p = isset($row['Price']) ? round(floatval($row['Price']), 2) : 0.0;
+									$lvlTxt = $row['Level'] ?? '';
+									$this->SetValue('act_price', $p);
+									$PRICE_LVL = 0;
+									switch($lvlTxt)
+									{
+										case "VERY_CHEAP":   $PRICE_LVL = 1; break;
+										case "CHEAP":        $PRICE_LVL = 2; break;
+										case "NORMAL":       $PRICE_LVL = 3; break;
+										case "EXPENSIVE":    $PRICE_LVL = 4; break;
+										case "VERY_EXPENSIVE": $PRICE_LVL = 5; break;
+									}
+									$this->SetValue('act_level', $PRICE_LVL);
+									$usedQuarter = true;
+									break;
+								}
+							}
+						}
+					}
+				}
+				// Fallback to hourly logic from Price_Array
+				if (!$usedQuarter) {
+					foreach ($prices as $wa_price){
+						$ident = isset($wa_price["Ident"]) ? $wa_price["Ident"] : '';
+						$day   = substr($ident,6,2); // 'T0' / 'T1'
+						if ($day !== 'T0') { continue; }
 						$PRICE_LVL = 0;
-
+						if (strpos($ident, 'PT60M_') === 0){
+							$hourVal = intval(substr($ident,9));
+							if ($hourVal !== $h) { continue; }
+						}
+						elseif (strpos($ident, 'PT15M_') === 0){
+							$idxQ = intval(substr($ident,9)); // 0..95
+							$hourVal = intdiv($idxQ, 4);
+							$segVal  = $idxQ % 4;
+							if (!($hourVal === $h && $segVal === $segNow)) { continue; }
+						}
+						else { continue; }
+						$this->SetValue('act_price' , $wa_price["Price"]);
 						switch($wa_price["Level"])
 						{
-							case "VERY_CHEAP":
-								$PRICE_LVL = 1;
-							break;
-							case "CHEAP":
-								$PRICE_LVL = 2;
-							break;
-							case "NORMAL":
-								$PRICE_LVL = 3;
-							break;
-							case "EXPENSIVE":
-								$PRICE_LVL = 4;
-							break;
-							case "VERY_EXPENSIVE":
-								$PRICE_LVL = 5;
-							break;
+							case "VERY_CHEAP":   $PRICE_LVL = 1; break;
+							case "CHEAP":        $PRICE_LVL = 2; break;
+							case "NORMAL":       $PRICE_LVL = 3; break;
+							case "EXPENSIVE":    $PRICE_LVL = 4; break;
+							case "VERY_EXPENSIVE": $PRICE_LVL = 5; break;
 						}
-
-						$this->SetValue('act_level', $PRICE_LVL );	
+						$this->SetValue('act_level', $PRICE_LVL );
+						break;
 					}
 				}
 				$this->Update_Ahead_Price_Data();
@@ -395,37 +444,130 @@ require_once __DIR__ . '/../libs/functions.php';
 					return;
 				}
 		
-			foreach ($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"] AS $key => $wa_price) {
-				
-				$var = 'PT60M_T0_'.$key;
-				$this->SetPriceVariables($var, $wa_price);
-				$result_array[] = [ 'Ident' => $var,
-									'Price' => $wa_price['total'] * 100,
-									'Level' => $wa_price['level'],
-									'start' => strtotime($wa_price['startsAt']),
-							 		'end' 	=> strtotime("+1 hour", strtotime($wa_price['startsAt'])) ];
-
+			// Detect resolution by step size (fallback to hourly)
+			$todayArr = $prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"];
+			$useQuarter = false;
+			if (is_array($todayArr) && count($todayArr) >= 2) {
+				$dt = strtotime($todayArr[1]['startsAt']) - strtotime($todayArr[0]['startsAt']);
+				if ($dt > 0 && $dt <= 1200) { $useQuarter = true; }
 			}
-			foreach ($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"] AS $key => $wa_price) {
-				
-				$t1 = true;
-				$var = 'PT60M_T1_'.$key;
-				$this->SetPriceVariables($var, $wa_price);
-				$result_array[] = [ 'Ident' => $var,
-									'Price' => $wa_price['total'] * 100,
-									'Level' => $wa_price['level'],
-									'start' => strtotime($wa_price['startsAt']),
-									'end' 	=> strtotime("+1 hour", strtotime($wa_price['startsAt']))];
-
-			}
+			if ($useQuarter) {
+                // Aggregate 15-min segments into hourly entries for TODAY
+                $groups = [];
+                $rawQ = [];
+                foreach ($todayArr as $row) {
+                    $st = strtotime($row['startsAt']);
+                    $keyH = date('YmdH', $st);
+                    if (!isset($groups[$keyH])) {
+                        $groups[$keyH] = [
+                            'sumCt' => 0,
+                            'cnt' => 0,
+                            'start' => $st - ($st % 3600),
+                            'level' => $row['level']
+                        ];
+                    }
+                    $groups[$keyH]['sumCt'] += ($row['total'] * 100);
+                    $groups[$keyH]['cnt'] += 1;
+                    // collect raw quarter-hourly (cent)
+                    $rawQ[] = [
+                        'start' => $st,
+                        'end'   => $st + 900,
+                        'Price' => $row['total'] * 100,
+                        'Level' => $row['level']
+                    ];
+                }
+                ksort($groups);
+                $idx = 0;
+                foreach ($groups as $g) {
+                    $avgCt = ($g['cnt'] > 0) ? ($g['sumCt'] / $g['cnt']) : 0;
+                    $var = 'PT60M_T0_' . $idx;
+                    $this->SetPriceVariables($var, [ 'total' => ($avgCt / 100), 'level' => $g['level'], 'startsAt' => date('c', $g['start']) ]);
+                    $result_array[] = [
+                        'Ident' => $var,
+                        'Price' => $avgCt,
+                        'Level' => $g['level'],
+                        'start' => $g['start'],
+                        'end'   => $g['start'] + 3600
+                    ];
+                    $idx++;
+                }
+            } else {
+                foreach ($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"] AS $key => $wa_price) {
+                    $var = 'PT60M_T0_' . $key;
+                    $this->SetPriceVariables($var, $wa_price);
+                    $result_array[] = [ 'Ident' => $var,
+                                        'Price' => $wa_price['total'] * 100,
+                                        'Level' => $wa_price['level'],
+                                        'start' => strtotime($wa_price['startsAt']),
+                                        'end'   => strtotime("+1 hour", strtotime($wa_price['startsAt'])) ];
+                }
+            }
+			if ($useQuarter) {
+                // Aggregate 15-min segments into hourly entries for TOMORROW
+                $tomArr = $prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"];
+                if (is_array($tomArr) && count($tomArr) > 0) { $t1 = true; }
+                $groups = [];
+                foreach ($tomArr as $row) {
+                    $st = strtotime($row['startsAt']);
+                    $keyH = date('YmdH', $st);
+                    if (!isset($groups[$keyH])) {
+                        $groups[$keyH] = [
+                            'sumCt' => 0,
+                            'cnt' => 0,
+                            'start' => $st - ($st % 3600),
+                            'level' => $row['level']
+                        ];
+                    }
+                    $groups[$keyH]['sumCt'] += ($row['total'] * 100);
+                    $groups[$keyH]['cnt'] += 1;
+                    // collect raw quarter-hourly (cent)
+                    $rawQ[] = [
+                        'start' => $st,
+                        'end'   => $st + 900,
+                        'Price' => $row['total'] * 100,
+                        'Level' => $row['level']
+                    ];
+                }
+                ksort($groups);
+                $idx = 0;
+                foreach ($groups as $g) {
+                    $t1 = true;
+                    $avgCt = ($g['cnt'] > 0) ? ($g['sumCt'] / $g['cnt']) : 0;
+                    $var = 'PT60M_T1_' . $idx;
+                    $this->SetPriceVariables($var, [ 'total' => ($avgCt / 100), 'level' => $g['level'], 'startsAt' => date('c', $g['start']) ]);
+                    $result_array[] = [
+                        'Ident' => $var,
+                        'Price' => $avgCt,
+                        'Level' => $g['level'],
+                        'start' => $g['start'],
+                        'end'   => $g['start'] + 3600
+                    ];
+                    $idx++;
+                }
+                // store raw quarter-hourly list for visualization
+                $this->WriteAttributeString('Price_Array_15m', json_encode($rawQ));
+            } else {
+                // clear raw quarter-hourly cache
+                $this->WriteAttributeString('Price_Array_15m', '');
+                foreach ($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"] AS $key => $wa_price) {
+                    $t1 = true;
+                    $var = 'PT60M_T1_' . $key;
+                    $this->SetPriceVariables($var, $wa_price);
+                    $result_array[] = [ 'Ident' => $var,
+                                        'Price' => $wa_price['total'] * 100,
+                                        'Level' => $wa_price['level'],
+                                        'start' => strtotime($wa_price['startsAt']),
+                                        'end'   => strtotime("+1 hour", strtotime($wa_price['startsAt'])) ];
+                }
+            }
 
 			if (!$t1){
 				for ($i = 0; $i <= 23; $i++) {
 					$var = 'PT60M_T1_'.$i;
-				$this->SetPriceVariablesZero($var);
-				$result_array[] = [ 'Ident' => $var,
-									'Price' => 0,
-									'Level'	=> ''];
+					$this->SetPriceVariablesZero($var);
+					$result_array[] = [ 'Ident' => $var,
+											'Price' => 0,
+											'Level'	=> '' ];
 				}
 				$this->WriteAttributeBoolean('EEX_Received', false);
 			}
@@ -434,185 +576,288 @@ require_once __DIR__ . '/../libs/functions.php';
 			}
 			
        		$this->WriteAttributeString("Price_Array", json_encode($result_array));
+			// Statistik direkt aus dem frisch berechneten Array aktualisieren
+			$this->Statistics($result_array);
 	
 			//update tile Visu
 			$this->Update_Ahead_Price_Data();
 			//$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
 
-			if ($this->ReadPropertyBoolean('Price_log') == true){
-				$this->LogAheadPrices($result_array);
-			}
-
-
 		}
 
-		private function Update_Ahead_Price_Data()
-		{
-			$this->SendDebug(__FUNCTION__, $this->ReadAttributeString("Price_Array"), 0);
+        private function Update_Ahead_Price_Data()
+        {
+            $this->SendDebug(__FUNCTION__, $this->ReadAttributeString("Price_Array"), 0);
 
-			// Demo-Modus: synthetische 15-Minuten-Daten erzeugen (24h × 4)
-			if ($this->ReadPropertyBoolean('DemoMode')) {
-				date_default_timezone_set('Europe/Berlin');
-				$BarsPerHour = 4;
-				$hoursToShow = min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
-				$now = time();
-				$now = $now - ($now % 3600); // auf Stundenanfang
-				$base = 5.0; // ct/kWh, noch niedriger für deutlich negative Werte
-				$swing = 20.0; // größere Amplitude für stärkere Negativphasen
-				$noiseAmp = 3.0;
-				$dataset = [];
-				$avgPrices = [];
-				for ($h=0; $h<$hoursToShow; $h++) {
-					$hourSum = 0; $hourCount = 0;
-					for ($q=0; $q<$BarsPerHour; $q++) {
-						$start = $now + ($h*3600) + ($q*900);
-						$end   = $start + 900;
-						$priceRaw = $base + sin(($h/24)*pi()*2)*$swing + ((mt_rand(0, 100)-50)/50.0)*$noiseAmp;
-						$price = round($priceRaw, 3); // negative erlaubt
-						$level = ($price < 18) ? 'VERY_CHEAP' : (($price < 20) ? 'CHEAP' : (($price < 22) ? 'NORMAL' : (($price < 24) ? 'EXPENSIVE' : 'VERY_EXPENSIVE')));
-						$dataset[] = [ 'start'=>$start, 'end'=>$end, 'price'=>$price, 'level'=>$level ];
-						$hourSum += $price; $hourCount++;
-					}
-					$avgPrices[] = $hourCount>0 ? round($hourSum/$hourCount, 3) : 0;
-				}
-				$this->WriteAttributeString('AVGPrice', json_encode($avgPrices));
-				$payload = json_encode($dataset);
-				$this->WriteAttributeString('Ahead_Price_Data', $payload);
+            // Demo-Modus: synthetische 15-Minuten-Daten erzeugen (24h × 4)
+            if ($this->ReadPropertyBoolean('DemoMode')) {
+                date_default_timezone_set('Europe/Berlin');
+                $BarsPerHour = 4;
+                $hoursToShow = min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
+                $now = time();
+                $now = $now - ($now % 3600); // auf Stundenanfang
+                $base = 5.0; // ct/kWh, noch niedriger für deutlich negative Werte
+                $swing = 20.0; // größere Amplitude für stärkere Negativphasen
+                $noiseAmp = 3.0;
+                $dataset = [];
+                $avgPrices = [];
+                for ($h=0; $h<$hoursToShow; $h++) {
+                    $hourSum = 0; $hourCount = 0;
+                    for ($q=0; $q<$BarsPerHour; $q++) {
+                        $start = $now + ($h*3600) + ($q*900);
+                        $end   = $start + 900;
+                        $priceRaw = $base + sin(($h/24)*pi()*2)*$swing + ((mt_rand(0, 100)-50)/50.0)*$noiseAmp;
+                        $price = round($priceRaw, 3); // negative erlaubt
+                        $level = ($price < 18) ? 'VERY_CHEAP' : (($price < 20) ? 'CHEAP' : (($price < 22) ? 'NORMAL' : (($price < 24) ? 'EXPENSIVE' : 'VERY_EXPENSIVE')));
+                        $dataset[] = [ 'start'=>$start, 'end'=>$end, 'price'=>$price, 'level'=>$level ];
+                        $hourSum += $price; $hourCount++;
+                    }
+                    $avgPrices[] = $hourCount>0 ? round($hourSum/$hourCount, 3) : 0;
+                }
+                $this->WriteAttributeString('AVGPrice', json_encode($avgPrices));
+                // Tile-Dataset folgt globalem 15m-Schalter (Enable_15m)
+                $payloadTile = json_encode($dataset);
+                if (!$this->ReadPropertyBoolean('Enable_15m')) {
+                    // auf Stunden aggregieren
+                    $agg = [];
+                    for ($h=0; $h<$hoursToShow; $h++){
+                        $sum=0; $cnt=0; $start = $now + ($h*3600);
+                        for ($q=0; $q<4; $q++){ $sum += $dataset[$h*4+$q]['price']; $cnt++; }
+                        $avg = $cnt>0 ? round($sum/$cnt, 3) : 0;
+                        $level = $dataset[$h*4]['level'];
+                        $agg[] = [ 'start'=>$start, 'end'=>$start+3600, 'price'=>$avg, 'level'=>$level ];
+                    }
+                    $payloadTile = json_encode($agg);
+                }
+                $this->WriteAttributeString('Ahead_Price_Data', $payloadTile);
+                if ($this->ReadPropertyBoolean('Ahead_Price_Data_bool')){
+                    // Immer Stundenpreise aggregieren für Variable 1
+                    $payload60 = '';
+                    if ($this->ReadPropertyBoolean('Enable_15m')){
+                        $payload60 = $payloadTile;
+                    } else {
+                        $varArr = [];
+                        for ($h=0; $h<$hoursToShow; $h++){
+                            $sum=0; $cnt=0; $start = $now + ($h*3600);
+                            for ($q=0; $q<4; $q++){ $sum += $dataset[$h*4+$q]['price']; $cnt++; }
+                            $avg = $cnt>0 ? round($sum/$cnt, 3) : 0;
+                            $level = $dataset[$h*4]['level'];
+                            $varArr[] = [ 'start'=>$start, 'end'=>$start+3600, 'price'=>$avg, 'level'=>$level ];
+                        }
+                        $payload60 = json_encode($varArr);
+                    }
+                    if (@$this->GetIDForIdent('Ahead_Price_Data_60m')) { $this->SetValue('Ahead_Price_Data_60m', $payload60); }
+                    // Variable 2: 15-Minuten-Preise nur bei global aktiv, sonst leer
+                    $val15 = $this->ReadPropertyBoolean('Enable_15m') ? json_encode($dataset) : '';
+                    if (@$this->GetIDForIdent('Ahead_Price_Data_15m')) { $this->SetValue('Ahead_Price_Data_15m', $val15); }
+                }
+                return;
+            }
+
+            // Normalbetrieb: Daten aus Price_Array übernehmen
+            if ($this->ReadAttributeString("Price_Array") != '')
+            {
+                date_default_timezone_set('Europe/Berlin');
+                $hoursToShow = min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
+                if ($hoursToShow < 12) { $hoursToShow = 12; }
+                $Ahead_Price_Data = [];
+                $AVGPrice = [];
+                $nowSec = time();
+
+                $useRaw15 = false;
+                $raw15 = [];
+                if ($this->ReadPropertyBoolean('Enable_15m')){
+                    $rawStr = $this->ReadAttributeString('Price_Array_15m');
+                    $raw15 = $rawStr ? json_decode($rawStr, true) : [];
+                    $useRaw15 = is_array($raw15) && count($raw15) > 0;
+                }
+
+                if ($useRaw15){
+                    // Use true quarter-hourly items from API, aligned to full hour
+                    usort($raw15, function($a,$b){ return ($a['start'] <=> $b['start']); });
+                    $barsLimit = $hoursToShow * 4;
+                    $barsAdded = 0;
+                    $hourSums = [];
+                    $hourCounts = [];
+                    $startHour = $nowSec - ($nowSec % 3600);
+                    foreach ($raw15 as $row){
+                        $st = isset($row['start']) ? intval($row['start']) : 0;
+                        $en = isset($row['end']) ? intval($row['end']) : ($st + 900);
+                        if ($st < $startHour) { continue; }
+                        if ($barsAdded >= $barsLimit) { break; }
+                        $hk = date('YmdH', $st);
+                        if (!isset($hourSums[$hk])) { $hourSums[$hk] = 0; $hourCounts[$hk] = 0; }
+                        $p = isset($row['Price']) ? floatval($row['Price']) : 0.0;
+                        $lvl = $row['Level'] ?? '';
+                        $hourSums[$hk] += $p;
+                        $hourCounts[$hk] += 1;
+                        $Ahead_Price_Data[] = [
+                            'start' => $st,
+                            'end'   => $en,
+                            'price' => round($p, 2),
+                            'level' => $lvl
+                        ];
+                        $barsAdded++;
+                    }
+                    // AVG per hour from accumulated sums, in order of first appearance
+                    $seen = [];
+                    foreach ($Ahead_Price_Data as $row){
+                        $hk = date('YmdH', $row['start']);
+                        if (isset($seen[$hk])) { continue; }
+                        $seen[$hk] = true;
+                        if (isset($hourCounts[$hk]) && $hourCounts[$hk] > 0){
+                            $AVGPrice[] = round($hourSums[$hk] / $hourCounts[$hk], 2);
+                        }
+                        if (count($AVGPrice) >= $hoursToShow) { break; }
+                    }
+                } else {
+                    // Fallback to hourly array and optional split
+                    $items = json_decode($this->ReadAttributeString('Price_Array'), true);
+                    if (!is_array($items)) { return; }
+                    // detect bars per hour
+                    $barsPerHour = 1;
+                    if (count($items) >= 2 && isset($items[0]['start'], $items[0]['end'], $items[1]['start'])){
+                        $dt = ($items[0]['end'] - $items[0]['start']);
+                        if ($dt >= 899 && $dt <= 901) { $barsPerHour = 4; }
+                    }
+                    $nowH = intval(date('G'));
+                    // Start always at the beginning of the current hour for 15-minute view
+                    $thresholdIndex = ($barsPerHour == 4) ? ($nowH * 4) : $nowH;
+                    $startIdx = max(0, $thresholdIndex);
+                    $endIdx = count($items) - 1;
+                    $outputBarsPerHour = $barsPerHour;
+                    $barsLimit = $hoursToShow * $outputBarsPerHour;
+                    $barsAdded = 0;
+                    $hourSums = [];
+                    $hourCounts = [];
+                    for ($i = $startIdx; $i <= $endIdx; $i++){
+                        if ($barsAdded >= $barsLimit) { break; }
+                        $value = $items[$i];
+                        $valueStart = isset($value['start']) ? $value['start'] : ($i > 0 ? ($items[$i-1]['end'] ?? time()) : time());
+                        $valueEnd   = isset($value['end'])   ? $value['end']   : ($valueStart + 3600);
+                        $duration   = $valueEnd - $valueStart;
+                        $valuePrice = isset($value['Price']) ? $value['Price'] : 0;
+                        $valueLevel = isset($value['Level']) ? $value['Level'] : '';
+                        $hourKey = date('YmdH', $valueStart);
+                        if (!isset($hourSums[$hourKey])) { $hourSums[$hourKey]=0; $hourCounts[$hourKey]=0; }
+                        if ($duration >= 3599) {
+                            $hourSums[$hourKey] += $valuePrice;
+                            $hourCounts[$hourKey] += 1;
+                            $Ahead_Price_Data[] = [ 'start'=>$valueStart, 'end'=>$valueEnd, 'price'=>round($valuePrice,2), 'level'=>$valueLevel ];
+                            $barsAdded++;
+                        } else {
+                            $hourSums[$hourKey] += $valuePrice;
+                            $hourCounts[$hourKey] += 1;
+                            $Ahead_Price_Data[] = [ 'start'=>$valueStart, 'end'=>$valueEnd, 'price'=>round($valuePrice,2), 'level'=>$valueLevel ];
+                            $barsAdded++;
+                        }
+                    }
+                    $avg = [];
+                    $seen = [];
+                    for ($i = $startIdx; $i < $startIdx + ($hoursToShow * max(1,$barsPerHour)) && $i < count($items); $i++){
+                        $hk = date('YmdH', isset($items[$i]['start']) ? $items[$i]['start'] : time());
+                        if (isset($seen[$hk])) { continue; }
+                        $seen[$hk] = true;
+                        if (isset($hourCounts[$hk]) && $hourCounts[$hk] > 0){
+                            $avg[] = round($hourSums[$hk] / $hourCounts[$hk], 2);
+                        }
+                    }
+                    $AVGPrice = $avg;
+                }
+
+                $this->WriteAttributeString('AVGPrice', json_encode($AVGPrice));
+                // Tile-Payload nach globalem 15m-Modus
+                $payloadTile = json_encode($Ahead_Price_Data);
+                $this->SendDebug(__FUNCTION__, $payloadTile, 0);
+                $this->WriteAttributeString('Ahead_Price_Data', $payloadTile);
 				if ($this->ReadPropertyBoolean('Ahead_Price_Data_bool')){
-					$this->SetValue("Ahead_Price_Data", $payload);
-				}
-				return;
-			}
-
-			// Normalbetrieb: Daten aus Price_Array übernehmen
-			if ($this->ReadAttributeString("Price_Array") != '')
-			{
-				$Ahead_Price_Data = [];
-				$h = date('G');
-				$lastHour = "";
-				$AVGPrice = array();
-				$dateIndex = 0;
-				foreach (json_decode($this->ReadAttributeString('Price_Array'),true) as $data => $value)
-				{
-					if (empty($value['start']))
-					{
-						$valueStart = strtotime("+1 hour",$lastHour); 
-						$lastHour = $valueStart; 
+					// Bestimme Granularität des Tile-Datasets
+					$tileBarsPerHour = 1;
+					if (count($Ahead_Price_Data) >= 1 && isset($Ahead_Price_Data[0]['end'], $Ahead_Price_Data[0]['start'])){
+						$dt0 = $Ahead_Price_Data[0]['end'] - $Ahead_Price_Data[0]['start'];
+						if ($dt0 >= 899 && $dt0 <= 901) { $tileBarsPerHour = 4; }
 					}
-					else
-					{
-						$valueStart = $value['start']; 
-						$lastHour = $valueStart;
+					// Variable 1: immer Stundenpreise
+					$payload60 = '';
+					if ($tileBarsPerHour === 1) {
+						$payload60 = $payloadTile;
+					} else {
+						$varArr = [];
+						$barsPerHourLocal = 4;
+						$expectedBars = count($Ahead_Price_Data);
+						$hoursLocal = intdiv($expectedBars + ($barsPerHourLocal-1), $barsPerHourLocal);
+						for ($h=0; $h<$hoursLocal; $h++){
+							$firstIdx = $h * $barsPerHourLocal;
+							if (!isset($Ahead_Price_Data[$firstIdx])) break;
+							$sum=0; $cnt=0; $start = $Ahead_Price_Data[$firstIdx]['start'];
+							for ($q=0; $q<$barsPerHourLocal; $q++){
+								$idx = $firstIdx + $q; if (!isset($Ahead_Price_Data[$idx])) break;
+								$sum += ($Ahead_Price_Data[$idx]['price'] ?? 0); $cnt++;
+							}
+							$avg = $cnt>0 ? round($sum/$cnt, 2) : 0;
+							$varArr[] = [ 'start'=>$start, 'end'=>$start+3600, 'price'=>$avg, 'level'=>($Ahead_Price_Data[$firstIdx]['level'] ?? '') ];
+						}
+						$payload60 = json_encode($varArr);
 					}
-
-					if (empty($value['end']))
-					{
-						$valueEnd = strtotime("+1 hour",$valueStart); 	
+					if (@$this->GetIDForIdent('Ahead_Price_Data_60m')) { $this->SetValue('Ahead_Price_Data_60m', $payload60); }
+					// Variable 2: 15-Minuten-Preise nur wenn global aktiviert, sonst leer
+					$payload15 = '';
+					if ($this->ReadPropertyBoolean('Enable_15m')) {
+						if ($tileBarsPerHour === 4) {
+							$payload15 = $payloadTile;
+						} else {
+							// stündlich -> 15m splitten
+							$split = [];
+							foreach ($Ahead_Price_Data as $row){
+								$vs = $row['start'] ?? 0; $price = $row['price'] ?? 0; $lvl = $row['level'] ?? '';
+								for ($q=0; $q<4; $q++){
+									$qs = $vs + ($q*900); $qe = $qs + 900;
+									$split[] = [ 'start'=>$qs, 'end'=>$qe, 'price'=>round($price,2), 'level'=>$lvl ];
+								}
+							}
+							$payload15 = json_encode($split);
+						}
 					}
-					else
-					{
-						$valueEnd = $value['end'];
-					}
-
-					$valuePrice = empty($value['Price']) ? 0 : $value['Price'];
-					$valueLevel = empty($value['Level']) ? "" : $value['Level'];
-
-					if ($data >= $h)
-					{
-						if ($dateIndex >= self::HTML_Max_HourAhead){ break; }
-						$AVGPrice[] = $valuePrice;
-						$dateIndex++;
-						$Ahead_Price_Data[] = [ 'start' => $valueStart,
-												'end'   => $valueEnd,
-												'price' => round($valuePrice,2),
-												'level' => $valueLevel
-											];
-					}
-				}
-				$this->WriteAttributeString('AVGPrice',json_encode($AVGPrice));
-				$Ahead_Price_Data = json_encode($Ahead_Price_Data);
-				$this->SendDebug(__FUNCTION__, json_encode($Ahead_Price_Data), 0);
-				$this->WriteAttributeString('Ahead_Price_Data', $Ahead_Price_Data);
-				if ($this->ReadPropertyBoolean('Ahead_Price_Data_bool')){
-					$this->SetValue("Ahead_Price_Data", $Ahead_Price_Data);
+					if (@$this->GetIDForIdent('Ahead_Price_Data_15m')) { $this->SetValue('Ahead_Price_Data_15m', $payload15); }
 				}
 			}
 		}
 
-		private function LogAheadPrices($result_array)
-		{
-			date_default_timezone_set('Europe/Berlin');
-			$start = mktime(0, 0, 0, intval( date("m") ) , intval(date("d")-2), intval(date("Y")));
-			$end = mktime(23, 59, 59, intval( date("m") ) , intval(date("d")-1), intval(date("Y")));
-
-			AC_DeleteVariableData($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent("Ahead_Price"), $start, $end);
-
-			foreach ( $result_array as $Pos => $res ){
-				if ( substr($res["Ident"],7,1) == 0 ) {
-					$hour = intval(substr($res["Ident"],9));
-					AC_AddLoggedValues($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent("Ahead_Price"), [[ 'TimeStamp' => mktime($hour, 00, 01, intval( date("m") ) , intval(date("d")-2), intval(date("Y"))), 'Value' => $res["Price"] ]]);
-				}
-				elseif ( substr($res["Ident"],7,1) == 1 ){
-					$hour = intval(substr($res["Ident"],9));
-					AC_AddLoggedValues($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent("Ahead_Price"), [[ 'TimeStamp' => mktime($hour, 00, 01, intval( date("m") ) , intval(date("d")-1), intval(date("Y"))), 'Value' => $res["Price"] ]]);
-				}
-			}
-			$count = count($result_array);
-			$this->SendDebug('Result_array', $count, 0);
-			if ($count <= self::HTML_Max_HourAhead){
-				AC_AddLoggedValues($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent("Ahead_Price"), [[ 'TimeStamp' => mktime(00, 00, 01, intval( date("m") ) , intval(date("d")-1), intval(date("Y"))), 'Value' => 0 ]]);
-			}
-			AC_ReAggregateVariable($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent("Ahead_Price"));
-		}
-
-		private function SetLogging()
-		{
-			$archive_handler = '{43192F0B-135B-4CE7-A0A7-1475603F3060}';  //ARchive Handler ermitteln
-			$ar = IPS_GetInstanceListByModuleID($archive_handler);
-			$ar_id = intval($ar[0]);
-			$this->WriteAttributeInteger("ar_handler", $ar_id);
-
-			$status = AC_GetLoggingStatus($ar_id, $this->GetIDForIdent("Ahead_Price"));
-			if ($status == false){
-				AC_SetLoggingStatus($ar_id,$this->GetIDForIdent("Ahead_Price"), true );
-			}
-			unset($status);
-			
-			$status = AC_GetLoggingStatus($ar_id, $this->GetIDForIdent("act_price"));
-			if ($status == false){
-				AC_SetLoggingStatus($ar_id,$this->GetIDForIdent("act_price"), true );
-			}
-			unset($status);
-			
-			$this->CreateAheadChart();
-		}
-		
-		private function CreateAheadChart()
-		{
-			if (!@$this->GetIDForIdent('TIBV2_Day_Ahead_Chart')){
-				$var = $this->GetIDForIdent('Ahead_Price');
-				$id = IPS_CreateMedia(4);
-				IPS_SetParent($id,  $this->InstanceID);
-				$payload = '{"datasets":[{"variableID":'.$var.',"fillColor":"#669c35","strokeColor":"#77bb41","timeOffset":-2,"visible":true,"title":"Preis Heute","type":"bar","side":"left"},{"variableID":'.$var.',"fillColor":"#f2f7b7","strokeColor":"#f2f7b7","timeOffset":-1,"visible":true,"title":"Preis Morgen","type":"bar","side":"left"}]}';
-				IPS_SetMediaFile($id,IPS_GetKernelDir().join(DIRECTORY_SEPARATOR, array("media", $id.".chart")),0);
-				IPS_SetMediaContent($id, base64_encode($payload));
-				IPS_SetName($id,'Day Ahead Chart');	
-				IPS_SetIdent($id, 'TIBV2_Day_Ahead_Chart') ;
-				IPS_SetPosition($id, 200);
-			}
-		}
 
 		private function SetPriceVariables(string $var, array $wa_price)
 		{	
-			if ($this->ReadPropertyBoolean('Price_Variables')){
-				$this->setvalue($var, $wa_price['total'] *100);
+			$priceCt = $wa_price['total'] * 100;
+			// Direct quarter-hourly variable
+			if (preg_match('/^PT15M_T([01])_(\d+)$/', $var)){
+				if ($this->ReadPropertyBoolean('Price_Variables_15m')){
+					$this->setvalue($var, $priceCt);
+				}
+				return;
+			}
+			// Hourly variable
+			if (preg_match('/^PT60M_T([01])_(\d+)$/', $var, $m)){
+				if ($this->ReadPropertyBoolean('Price_Variables')){
+					$this->setvalue($var, $priceCt);
+				}
+				return;
 			}
 		}
 
 		private function SetPriceVariablesZero(string $var)
 		{	
-			if ($this->ReadPropertyBoolean('Price_Variables')){
-				$this->setvalue($var, 0 );
+			// Direct quarter-hourly variable
+			if (preg_match('/^PT15M_T([01])_(\d+)$/', $var)){
+				if ($this->ReadPropertyBoolean('Price_Variables_15m')){
+					$this->setvalue($var, 0 );
+				}
+				return;
+			}
+			// Hourly variable
+			if (preg_match('/^PT60M_T([01])_(\d+)$/', $var, $m)){
+				if ($this->ReadPropertyBoolean('Price_Variables')){
+					$this->setvalue($var, 0 );
+				}
+				return;
 			}
 		}
 
@@ -648,12 +893,33 @@ require_once __DIR__ . '/../libs/functions.php';
 		private function SetUpdateTimerActualPrice()
 		{
 			date_default_timezone_set('Europe/Berlin');
-			$h = date('G');
-			if ($h <23){
-				$time_new = mktime($h+1, 0, 01, intval( date("m") ) , intval(date("d")), intval(date("Y")));
-			}
-			else{
-				$time_new = mktime(0, 0, 10, intval( date("m") ) , intval(date("d")+1), intval(date("Y")));
+			$now = time();
+			if ($this->ReadPropertyBoolean('Enable_15m')) {
+				// schedule at next quarter-hour boundary (+5s buffer)
+				$y = intval(date('Y', $now));
+				$m = intval(date('m', $now));
+				$d = intval(date('d', $now));
+				$h = intval(date('G', $now));
+				$min = intval(date('i', $now));
+				$nextQuarter = (intdiv($min, 15) + 1) * 15;
+				if ($nextQuarter >= 60) {
+					$hNext = $h + 1;
+					$dNext = $d + (($hNext >= 24) ? 1 : 0);
+					$hNext = $hNext % 24;
+					$time_new = mktime($hNext, 0, 5, $m, $dNext, $y);
+				} else {
+					$time_new = mktime($h, $nextQuarter, 5, $m, $d, $y);
+				}
+			} else {
+				$h = intval(date('G', $now));
+				$y = intval(date('Y', $now));
+				$m = intval(date('m', $now));
+				$d = intval(date('d', $now));
+				if ($h < 23){
+					$time_new = mktime($h+1, 0, 1, $m, $d, $y);
+				} else {
+					$time_new = mktime(0, 0, 10, $m, $d+1, $y);
+				}
 			}
 			$timer_new = $time_new - time();
 			if ($this->ReadPropertyBoolean("InstanceActive"))
@@ -717,22 +983,52 @@ require_once __DIR__ . '/../libs/functions.php';
 					}
 				}
 			}
+			// 15-minute variables (optional)
+			if ($this->ReadPropertyBoolean('Price_Variables_15m')){
+				// Today (T0)
+				for ($i = 0; $i <= 95; $i++) {
+					$h = intdiv($i, 4);
+					$m0 = ($i % 4) * 15;           // 0, 15, 30, 45
+					$m1 = $m0 + 15;                // 15, 30, 45, 60
+					$hEnd = ($h + intdiv($m1, 60)) % 24; // hour rollover
+					$mEnd = $m1 % 60;               // minute rollover
+					$label = sprintf('%s %02d:%02d %s %02d:%02d', $this->Translate('Today'), $h, $m0, $this->Translate('to'), $hEnd, $mEnd);
+					$this->RegisterVariableFloat("PT15M_T0_" . $i, $label, "Tibber.price.cent", 100 + $i);
+				}
+				// Tomorrow (T1)
+				for ($i = 0; $i <= 95; $i++) {
+					$h = intdiv($i, 4);
+					$m0 = ($i % 4) * 15;
+					$m1 = $m0 + 15;
+					$hEnd = ($h + intdiv($m1, 60)) % 24;
+					$mEnd = $m1 % 60;
+					$label = sprintf('%s %02d:%02d %s %02d:%02d', $this->Translate('Tomorrow'), $h, $m0, $this->Translate('to'), $hEnd, $mEnd);
+					$this->RegisterVariableFloat("PT15M_T1_" . $i, $label, "Tibber.price.cent", 200 + $i);
+				}
+			}
+			else
+			{
+				for ($i = 0; $i <= 95; $i++) {
+					if (@$this->GetIDForIdent("PT15M_T0_" . $i)) { $this->UnregisterVariable("PT15M_T0_" . $i); }
+				}
+				for ($i = 0; $i <= 95; $i++) {
+					if (@$this->GetIDForIdent("PT15M_T1_" . $i)) { $this->UnregisterVariable("PT15M_T1_" . $i); }
+				}
+			}
+ 
 			//$this->RegisterVariableFloat("hourly_consumption", 'Stündlicher Verbrauch', "", 0);
 			$this->RegisterVariableFloat("act_price", $this->Translate('actual price'), 'Tibber.price.cent', 0);
 			$this->RegisterVariableInteger("act_level", $this->Translate('actual price level'), 'Tibber.price.level', 0);
 			$this->RegisterVariableBoolean("RT_enabled", $this->Translate('realtime available'), '', 0);
 
 			if ($this->ReadPropertyBoolean('Ahead_Price_Data_bool') == true){
-				$this->RegisterVariableString("Ahead_Price_Data", $this->Translate("Ahead price data variable for energy optimizer"), "~TextBox", 0);
+				$this->RegisterVariableString("Ahead_Price_Data_60m", $this->Translate("Ahead price data variable for energy optimizer (hourly)"), "~TextBox", 0);
+				$this->RegisterVariableString("Ahead_Price_Data_15m", $this->Translate("Ahead price data variable for energy optimizer (15-minute)"), "~TextBox", 0);
 			}
 			else
 			{
-				$this->UnregisterVariable('Ahead_Price_Data');
-			}
-
-			if ($this->ReadPropertyBoolean('Price_log') == true){
-				$this->RegisterVariableFloat("Ahead_Price", $this->Translate('day ahead price helper variable'), 'Tibber.price.cent', 0);
-				$this->SetLogging();
+				$this->UnregisterVariable('Ahead_Price_Data_60m');
+				$this->UnregisterVariable('Ahead_Price_Data_15m');
 			}
 
 			// Statistic
@@ -866,108 +1162,58 @@ require_once __DIR__ . '/../libs/functions.php';
 
 		private function Statistics(array $Data)
 		{
-			if ($this->ReadPropertyBoolean('Statistics'))
-			{
-				$noon = false;
-				date_default_timezone_set('Europe/Berlin');
-				$h = date('G');
-				if ($h >=13)
-				{ 
-					$noon = true;
+			if (!$this->ReadPropertyBoolean('Statistics')) { return; }
+			date_default_timezone_set('Europe/Berlin');
+			// Partitioniere in HEUTE (T0) und MORGEN (T1) anhand des Idents
+			$minT0 = INF; $minIdentT0 = '';
+			$maxT0 = -INF; $maxIdentT0 = '';
+			$minT1 = INF; $minIdentT1 = '';
+			$maxT1 = -INF; $maxIdentT1 = '';
+			$lvlCountT1 = ['VERY_CHEAP'=>0,'CHEAP'=>0,'NORMAL'=>0,'EXPENSIVE'=>0,'VERY_EXPENSIVE'=>0];
+			$hasT0 = false; $hasT1 = false;
+			foreach ($Data as $row){
+				if (!isset($row['Ident'])) { continue; }
+				$ident = $row['Ident'];
+				$price = isset($row['Price']) ? floatval($row['Price']) : 0.0;
+				$dayFlag = substr($ident, 7, 1); // '0' or '1'
+				if ($dayFlag === '0'){
+					$hasT0 = true;
+					if ($price < $minT0) { $minT0 = $price; $minIdentT0 = $ident; }
+					if ($price > $maxT0) { $maxT0 = $price; $maxIdentT0 = $ident; }
 				}
-		
-				if ($noon)
-				{
-					// Initialisiere der Variablen
-					$minPrice = PHP_INT_MAX;
-					$minPriceIdent = '';
-					$maxPrice = PHP_INT_MIN;
-					$maxPriceIdent = '';
-					$levelCount = array('VERY_CHEAP'=>0,'CHEAP'=>0,'NORMAL'=>0,'EXPENSIVE'=>0,'VERY_EXPENSIVE'=>0);
-
-					//durchlaufe das Array, um den geringste und höchsten Preis inkl. Stunde (Ident) für morgen zu finden
-					for ($i = 24; $i <= 47; $i++)
-					{
-						$currentPrice = $Data[$i]['Price'];
-						//geringster Preis
-						if ($currentPrice < $minPrice)
-						{
-							$minPrice = $currentPrice;
-							$minPriceIdent = $Data[$i]['Ident'];
-						}
-						//höchster Preis
-						if ($currentPrice > $maxPrice)
-						{
-							$maxPrice = $currentPrice;
-							$maxPriceIdent = $Data[$i]['Ident'];
-						}
-					}
-
-						for ($i = 24; $i <= 47; $i++)
-						{
-							$level = $Data[$i]['Level'];
-							if (!empty($level))
-							{
-								$levelCount[$level]++;
-							}
-						}
-					//gib den geringsten und höchsten Preis aus
-					$this->SetValue('minprice', $minPrice);
-
-					$minTime=intval(substr($minPriceIdent, 9)); //Uhrzeit (Stunde), in welcher der niedrigste Preis gilt
-					$this->SetValue('lowtime', $minTime);
-					
-					$this->SetValue('maxprice', $maxPrice);
-					$maxTime=intval(substr($maxPriceIdent, 9)); //Uhrzeit (Stunde), in welcher der hächste Preis gilt
-					$this->SetValue('hightime', $maxTime);
-					$Spanne=$maxPrice-$minPrice;  //Preisspanne zwischen min und max
-					$this->SetValue('minmaxprice', $Spanne);
-					
-					//Zuordnung der Preislevel zu Variablen
-					//Anzahl der Preislevel am Folgetag
-					$this->SetValue('no_level1', $levelCount['VERY_CHEAP']);
-					$this->SetValue('no_level2', $levelCount['CHEAP']);
-					$this->SetValue('no_level3', $levelCount['NORMAL']);
-					$this->SetValue('no_level4', $levelCount['EXPENSIVE']);
-					$this->SetValue('no_level5', $levelCount['VERY_EXPENSIVE']);
+				elseif ($dayFlag === '1'){
+					$hasT1 = true;
+					if ($price < $minT1) { $minT1 = $price; $minIdentT1 = $ident; }
+					if ($price > $maxT1) { $maxT1 = $price; $maxIdentT1 = $ident; }
+					$level = $row['Level'] ?? '';
+					if (isset($lvlCountT1[$level])) { $lvlCountT1[$level]++; }
 				}
-				else
-				{
-					// Initialisiere der Variablen
-					$minPrice_today = PHP_INT_MAX;
-					$minPriceIdent_today = '';
-					$maxPrice_today = PHP_INT_MIN;
-					$maxPriceIdent_today = '';
-
-					//durchlaufe das Array, um den geringste und höchsten Preis inkl. Stunde (Ident) für morgen zu finden
-					for ($i = 0; $i <= 23; $i++)
-					{
-						$currentPrice_today = $Data[$i]['Price'];
-						//geringster Preis
-						if ($currentPrice_today < $minPrice_today)
-						{
-							$minPrice_today = $currentPrice_today;
-							$minPriceIdent_today = $Data[$i]['Ident'];
-						}
-						//höchster Preis
-						if ($currentPrice_today > $maxPrice_today)
-						{
-							$maxPrice_today = $currentPrice_today;
-							$maxPriceIdent_today = $Data[$i]['Ident'];
-						}
-						//gib den geringsten und höchsten Preis aus
-						$this->SetValue('minprice_today', $minPrice_today);
-
-						$minTime_today=intval(substr($minPriceIdent_today, 9)); //Uhrzeit (Stunde), in welcher der niedrigste Preis gilt
-						$this->SetValue('lowtime_today', $minTime_today);
-						
-						$this->SetValue('maxprice_today', $maxPrice_today);
-						$maxTime_today=intval(substr($maxPriceIdent_today, 9)); //Uhrzeit (Stunde), in welcher der hächste Preis gilt
-						$this->SetValue('hightime_today', $maxTime_today);
-						$Spanne_today=$maxPrice_today-$minPrice_today;  //Preisspanne zwischen min und max
-						$this->SetValue('minmaxprice_today', $Spanne_today);
-					}
-				}
+			}
+			// HEUTE setzen (falls vorhanden)
+			if ($hasT0 && is_finite($minT0) && is_finite($maxT0)){
+				$this->SetValue('minprice_today', $minT0);
+				$this->SetValue('maxprice_today', $maxT0);
+				$minHourT0 = intval(substr($minIdentT0, 9));
+				$maxHourT0 = intval(substr($maxIdentT0, 9));
+				$this->SetValue('lowtime_today', $minHourT0);
+				$this->SetValue('hightime_today', $maxHourT0);
+				$this->SetValue('minmaxprice_today', $maxT0 - $minT0);
+			}
+			// MORGEN setzen (falls vorhanden)
+			if ($hasT1 && is_finite($minT1) && is_finite($maxT1)){
+				$this->SetValue('minprice', $minT1);
+				$this->SetValue('maxprice', $maxT1);
+				$minHourT1 = intval(substr($minIdentT1, 9));
+				$maxHourT1 = intval(substr($maxIdentT1, 9));
+				$this->SetValue('lowtime', $minHourT1);
+				$this->SetValue('hightime', $maxHourT1);
+				$this->SetValue('minmaxprice', $maxT1 - $minT1);
+				// Levelzählung für morgen
+				$this->SetValue('no_level1', $lvlCountT1['VERY_CHEAP']);
+				$this->SetValue('no_level2', $lvlCountT1['CHEAP']);
+				$this->SetValue('no_level3', $lvlCountT1['NORMAL']);
+				$this->SetValue('no_level4', $lvlCountT1['EXPENSIVE']);
+				$this->SetValue('no_level5', $lvlCountT1['VERY_EXPENSIVE']);
 			}
 		}
 
@@ -1063,7 +1309,6 @@ require_once __DIR__ . '/../libs/functions.php';
 		{
 			//funktion um die Kachelvisu besser testen zu können.
 			$result[] = $this->GetFullUpdateMessage();
-            $result['Ahead_Price_Data'] = json_decode($this->GetValue("Ahead_Price_Data"),true);
 
 			$this->UpdateVisualizationValue(json_encode($result));
 			$this->SendDebug(__FUNCTION__,'Update Manu: '.json_encode($result),0);

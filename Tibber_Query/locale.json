@@ -48,7 +48,10 @@
             "Too many requests. Your IP is now temporarily banned for calling API for a few minutes.":"Zu viele Anfragen. Die IP ist temporär für einige minuten geblockt.",
             " o clock": " Uhr",
             "Ahead price data variable for energy optimizer":"Preisvorschaudaten für Energie Optimierer",
+            "Ahead price data variable for energy optimizer (hourly)":"Preisvorschaudaten für Energie Optimierer (Stundenpreise)",
+            "Ahead price data variable for energy optimizer (15-minute)":"Preisvorschaudaten für Energie Optimierer (15-Minuten-Preise)",
             "Create price ahead variable for energy optimizer":"erstelle Variable für Energie Optimierer",
+            "Create variables for energy optimizer (hourly + 15-minute)":"erstelle Variablen für Energie Optimierer mit Stundenpreisen und 15 Minuten Preisen",
             "advanced HTML settings": "erweiterte HTML Einstellungen",
             "Colorsettings":"Farbeinstellungen",
             "Fontcolor bars":"Schriftfarbe Balken",
@@ -84,7 +87,10 @@
             "show gridlines and prices":"Rasterlinien und Preise anzeigen",
             "rotate the hour text by 180 degrees": "drehe den Stundentext um 180 Grad",
             "Use own Fontcolor for Hour instead from Symcon Theme":"Nutze eigene Schriftfarbe für Stunden anstatt die vom Symcon Theme.",
-            "default Fontcolor hour":"eigene Schriftfarbe für Stunden"
+            "default Fontcolor hour":"eigene Schriftfarbe für Stunden",
+            "Enable 15-minute granularity for energy optimizer variable":"15-Minuten-Preise in Optimierer-Variable ausgeben",
+            "Enable 15-minute prices":"15-Minuten-Preise aktivieren",
+            "Price - create variables per 15 minutes (96 for current day & 96 for day ahead day)":"Preis - Variablen je 15 Minuten anlegen (96 für aktuellen Tag & 96 für die Preisvorschau)"
         }
     }
 }
