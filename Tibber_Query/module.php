@@ -805,17 +805,6 @@ require_once __DIR__ . '/../libs/functions.php';
 					if ($this->ReadPropertyBoolean('Enable_15m')) {
 						if ($tileBarsPerHour === 4) {
 							$payload15 = $payloadTile;
-						} else {
-							// stündlich -> 15m splitten
-							$split = [];
-							foreach ($Ahead_Price_Data as $row){
-								$vs = $row['start'] ?? 0; $price = $row['price'] ?? 0; $lvl = $row['level'] ?? '';
-								for ($q=0; $q<4; $q++){
-									$qs = $vs + ($q*900); $qe = $qs + 900;
-									$split[] = [ 'start'=>$qs, 'end'=>$qe, 'price'=>round($price,2), 'level'=>$lvl ];
-								}
-							}
-							$payload15 = json_encode($split);
 						}
 					}
 					if (@$this->GetIDForIdent('Ahead_Price_Data_15m')) { $this->SetValue('Ahead_Price_Data_15m', $payload15); }
