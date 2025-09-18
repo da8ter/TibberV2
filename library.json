@@ -1,12 +1,12 @@
 {
     "id": "{D10B7DAE-2D79-8254-B521-CC626BF62FBD}",
     "name": "Tibber V.2",
-    "author": "Stephan Sprick",
-    "url": "https://github.com/da8ter/TibberV2.git",
+    "author": "Kristian Lorbetzki",
+    "url": "https://github.com/lorbetzki/net.lorbetzki.tibber.v2.git",
     "compatibility": {
         "version": "7.1"
     },
-    "version": "2.4.5",
+    "version": "2.4.4",
     "build": 20250408,
     "date": 0
 }

@@ -35,8 +35,6 @@ require_once __DIR__ . '/../libs/functions.php';
 
 
 			$this->RegisterPropertyBoolean("InstanceActive", true);
-			// Backend-Demo-Schalter
-			$this->RegisterPropertyBoolean("DemoMode", false);
 			$this->RegisterPropertyString("Token", '');
 			$this->RegisterPropertyString("Api", 'https://api.tibber.com/v1-beta/gql');
 			$this->RegisterPropertyString("Home_ID",'0');
@@ -77,9 +75,6 @@ require_once __DIR__ . '/../libs/functions.php';
 
 			$this->RegisterPropertyInteger("HTML_BGCstartG", self::HTML_Color_Mint);
 			$this->RegisterPropertyInteger("HTML_BGCstopG", self::HTML_Color_Darkmint);
-			// Gradient-Farben für den aktuellen Balken
-			$this->RegisterPropertyInteger("HTML_BGCstartG_Current", self::HTML_Color_Orange);
-			$this->RegisterPropertyInteger("HTML_BGCstopG_Current", self::HTML_Color_Red);
 			$this->RegisterPropertyBoolean("HTML_MarkPriceLevel", false);
 			
 			$this->RegisterPropertyInteger("HTML_PriceLevelThick", self::HTML_Default_PX);
@@ -91,8 +86,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyInteger("HTML_Default_HourAhead", self::HTML_Default_HourAhead);
 			$this->RegisterPropertyInteger("HTML_Bar_Price_Round", self::HTML_Bar_Price_Round);
 			$this->RegisterPropertyBoolean("HTML_Bar_Price_vis_ct", self::HTML_Bar_Price_vis_ct);
-			$this->RegisterPropertyBoolean("HTML_Bar_Show_Prices", true);
-			$this->RegisterPropertyBoolean("HTML_Show_Grid", true);
 			
 			$this->RegisterPropertyBoolean("HTML_Hour_WriteMode", self::HTML_Hour_WriteMode);
 
@@ -272,10 +265,10 @@ require_once __DIR__ . '/../libs/functions.php';
 
 			$result=$this->ReadAttributeString("Homes");
 			$this->SendDebug("Form_homes", $result, 0);
-			if ($result == '') return json_encode($jsonform);
+			if ($result == '') return;
 			$homes = json_decode($result, true);
-			$value = [];
 			$value[] = ["caption"=> "Select Home", "value"=> "0" ];
+			//$value ="";
 			foreach ($homes["data"]["viewer"]["homes"] as $key => $home){
 				if (empty($home["appNickname"]) )
 					{	
@@ -287,40 +280,12 @@ require_once __DIR__ . '/../libs/functions.php';
 					}
 				$value[] = ["caption"=> $caption, "value"=> $home["id"] ];
 			}
+			$jsonform["elements"][2]["options"] = $value;
+			$jsonform["elements"][2]["visible"] = true;
+			$jsonform["elements"][5]["items"][3]["visible"] = $this->ReadPropertyBoolean('HTML_FontColorHourDefaultSymcon');
 
-			// Element mit name "Home_ID" suchen und aktualisieren
-			foreach ($jsonform['elements'] as $idx => &$el) {
-				if (isset($el['name']) && $el['name'] === 'Home_ID') {
-					$el['options'] = $value;
-					$el['visible'] = true;
-				}
-			}
-
-			// Colorsettings-Panel finden und Sichtbarkeit von HTML_FontColorHourDefault setzen
-			foreach ($jsonform['elements'] as $idx => &$el) {
-				if (isset($el['type']) && $el['type'] === 'ExpansionPanel' && isset($el['caption']) && $el['caption'] === 'Colorsettings') {
-					if (isset($el['items']) && is_array($el['items'])) {
-						foreach ($el['items'] as &$item) {
-							if (isset($item['name']) && $item['name'] === 'HTML_FontColorHourDefault') {
-								$item['visible'] = $this->ReadPropertyBoolean('HTML_FontColorHourDefaultSymcon');
-							}
-						}
-					}
-				}
-			}
-
-			// Barsettings-Panel finden und Sichtbarkeit des RowLayout "ShowPriceLevelEnhanced" setzen
-			foreach ($jsonform['elements'] as $idx => &$el) {
-				if (isset($el['type']) && $el['type'] === 'ExpansionPanel' && isset($el['caption']) && $el['caption'] === 'Barsettings') {
-					if (isset($el['items']) && is_array($el['items'])) {
-						foreach ($el['items'] as &$item) {
-							if (isset($item['name']) && $item['name'] === 'ShowPriceLevelEnhanced') {
-								$item['visible'] = $this->ReadPropertyBoolean('HTML_MarkPriceLevel');
-							}
-						}
-					}
-				}
-			}
+			$jsonform["elements"][6]["items"][6]["visible"] = $this->ReadPropertyBoolean('HTML_MarkPriceLevel');
+			//$jsonform["elements"][7]["items"][3] = $this->ReadPropertyBoolean('HTML_Hour_WriteMode');
 
 			return json_encode($jsonform);
 		}
@@ -450,41 +415,6 @@ require_once __DIR__ . '/../libs/functions.php';
 		{
 			$this->SendDebug(__FUNCTION__, $this->ReadAttributeString("Price_Array"), 0);
 
-			// Demo-Modus: synthetische 15-Minuten-Daten erzeugen (24h × 4)
-			if ($this->ReadPropertyBoolean('DemoMode')) {
-				date_default_timezone_set('Europe/Berlin');
-				$BarsPerHour = 4;
-				$hoursToShow = min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
-				$now = time();
-				$now = $now - ($now % 3600); // auf Stundenanfang
-				$base = 5.0; // ct/kWh, noch niedriger für deutlich negative Werte
-				$swing = 20.0; // größere Amplitude für stärkere Negativphasen
-				$noiseAmp = 3.0;
-				$dataset = [];
-				$avgPrices = [];
-				for ($h=0; $h<$hoursToShow; $h++) {
-					$hourSum = 0; $hourCount = 0;
-					for ($q=0; $q<$BarsPerHour; $q++) {
-						$start = $now + ($h*3600) + ($q*900);
-						$end   = $start + 900;
-						$priceRaw = $base + sin(($h/24)*pi()*2)*$swing + ((mt_rand(0, 100)-50)/50.0)*$noiseAmp;
-						$price = round($priceRaw, 3); // negative erlaubt
-						$level = ($price < 18) ? 'VERY_CHEAP' : (($price < 20) ? 'CHEAP' : (($price < 22) ? 'NORMAL' : (($price < 24) ? 'EXPENSIVE' : 'VERY_EXPENSIVE')));
-						$dataset[] = [ 'start'=>$start, 'end'=>$end, 'price'=>$price, 'level'=>$level ];
-						$hourSum += $price; $hourCount++;
-					}
-					$avgPrices[] = $hourCount>0 ? round($hourSum/$hourCount, 3) : 0;
-				}
-				$this->WriteAttributeString('AVGPrice', json_encode($avgPrices));
-				$payload = json_encode($dataset);
-				$this->WriteAttributeString('Ahead_Price_Data', $payload);
-				if ($this->ReadPropertyBoolean('Ahead_Price_Data_bool')){
-					$this->SetValue("Ahead_Price_Data", $payload);
-				}
-				return;
-			}
-
-			// Normalbetrieb: Daten aus Price_Array übernehmen
 			if ($this->ReadAttributeString("Price_Array") != '')
 			{
 				$Ahead_Price_Data = [];
@@ -494,6 +424,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				$dateIndex = 0;
 				foreach (json_decode($this->ReadAttributeString('Price_Array'),true) as $data => $value)
 				{
+
 					if (empty($value['start']))
 					{
 						$valueStart = strtotime("+1 hour",$lastHour); 
@@ -514,28 +445,49 @@ require_once __DIR__ . '/../libs/functions.php';
 						$valueEnd = $value['end'];
 					}
 
-					$valuePrice = empty($value['Price']) ? 0 : $value['Price'];
-					$valueLevel = empty($value['Level']) ? "" : $value['Level'];
+					if (empty($value['Price']))
+					{
+						$valuePrice = 0;
+					}
+					else
+					{
+						$valuePrice = $value['Price'];
+						if ($data >= $h)
+						{
+							if ($dateIndex >= self::HTML_Max_HourAhead){ break; }
+							$AVGPrice[] = $valuePrice;
+							$dateIndex++;
+						}
+					}
+					if (empty($value['Level']))					
+					{
+						$valueLevel = "";
+					}
+					else
+					{
+						$valueLevel = $value['Level'];
+					}
 
 					if ($data >= $h)
 					{
-						if ($dateIndex >= self::HTML_Max_HourAhead){ break; }
-						$AVGPrice[] = $valuePrice;
-						$dateIndex++;
 						$Ahead_Price_Data[] = [ 'start' => $valueStart,
 												'end'   => $valueEnd,
 												'price' => round($valuePrice,2),
 												'level' => $valueLevel
 											];
 					}
+					
 				}
+	
 				$this->WriteAttributeString('AVGPrice',json_encode($AVGPrice));
 				$Ahead_Price_Data = json_encode($Ahead_Price_Data);
 				$this->SendDebug(__FUNCTION__, json_encode($Ahead_Price_Data), 0);
+
 				$this->WriteAttributeString('Ahead_Price_Data', $Ahead_Price_Data);
 				if ($this->ReadPropertyBoolean('Ahead_Price_Data_bool')){
 					$this->SetValue("Ahead_Price_Data", $Ahead_Price_Data);
 				}
+				//$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
 			}
 		}
 
@@ -1022,7 +974,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			$result['BorderRadius']		= $this->ReadPropertyInteger("HTML_BorderRadius");
 			$result['Scale']			= $this->ReadPropertyInteger("HTML_Scale");
 			$result['Gradient']			= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG"));
-			$result['GradientCurrent']	= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG_Current")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG_Current"));
 			$result['MarkPriceLevel']	= $this->ReadPropertyBoolean("HTML_MarkPriceLevel");
 						
 			$result['BGCPriceVC']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceVC"));
@@ -1031,12 +982,10 @@ require_once __DIR__ . '/../libs/functions.php';
 			$result['BGCPriceE']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceE"));
 			$result['BGCPriceVE']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceVE"));
 			$result['PriceLevelThickness']			= $this->ReadPropertyInteger("HTML_PriceLevelThick");
-			$result['HourAhead']					= min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
+			$result['HourAhead']					= min ($this->ReadPropertyInteger("HTML_Default_HourAhead"), $this->hoursUntilTomorrowMidnight());
 
 			$result['bar_price_round']				= $this->ReadPropertyInteger("HTML_Bar_Price_Round");
 			$result['bar_price_vis_ct']				= $this->ReadPropertyBoolean("HTML_Bar_Price_vis_ct");
-			$result['bar_show_prices']              = $this->ReadPropertyBoolean("HTML_Bar_Show_Prices");
-			$result['show_grid']                    = $this->ReadPropertyBoolean("HTML_Show_Grid");
 
 			$result['hour_write_mode']				= $this->ReadPropertyBoolean("HTML_Hour_WriteMode");;
 
@@ -1082,8 +1031,8 @@ require_once __DIR__ . '/../libs/functions.php';
 		}
 		//allow to reset all HTML Variables to default
 		private function ResetHTML()
-{
-    $defaults = [ 
+		{
+			$defaults = [ 
 				'HTML_FontSizeMinB'=> self::HTML_FontSizeMin,
 				'HTML_FontSizeMaxB'=> self::HTML_FontSizeMax,
 				'HTML_FontSizeDefB'=> self::HTML_FontSizeDef,
@@ -1098,12 +1047,10 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_FontColorHourDefault'=> self::HTML_Color_Black,
 				'HTML_BGColorHour'=> self::HTML_Color_Grey,
 				'HTML_BorderRadius'=> self::HTML_Default_PX,
-		'HTML_Scale'=> self::HTML_Default_PX,
-		'HTML_BGCstartG'=> self::HTML_Color_Mint,
-		'HTML_BGCstopG'=> self::HTML_Color_Darkmint,
-		'HTML_BGCstartG_Current'=> self::HTML_Color_Orange,
-		'HTML_BGCstopG_Current'=> self::HTML_Color_Red,
-		'HTML_MarkPriceLevel'=> false,
+				'HTML_Scale'=> self::HTML_Default_PX,
+				'HTML_BGCstartG'=> self::HTML_Color_Mint,
+				'HTML_BGCstopG'=> self::HTML_Color_Darkmint,
+				'HTML_MarkPriceLevel'=> false,
 				'HTML_PriceLevelThick'=> self::HTML_Default_PX,
 				'HTML_BGColorPriceVC'=> self::HTML_Color_Darkgreen,
 				'HTML_BGColorPriceC'=> self::HTML_Color_Green,
@@ -1113,11 +1060,9 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_Default_HourAhead'=> self::HTML_Default_HourAhead,
 				'HTML_Bar_Price_Round'=> self::HTML_Bar_Price_Round,
 				'HTML_Bar_Price_vis_ct'=> self::HTML_Bar_Price_vis_ct,
-				'HTML_Bar_Show_Prices'=> true,
-				'HTML_Show_Grid'=> true,
-				'HTML_Hour_WriteMode'=> self::HTML_Hour_WriteMode      
-
-    ];
+				'HTML_Hour_WriteMode'=> self::HTML_Hour_WriteMode		
+			
+			];
 			
 			foreach ($defaults as $data => $value)
 			{

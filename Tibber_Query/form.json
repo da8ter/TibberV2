@@ -2,10 +2,6 @@
     "elements": 
     [
         {   "type": "CheckBox",
-            "name": "DemoMode",
-            "caption": "Demo mode (simulate 15-minute data)"
-        },
-        {   "type": "CheckBox",
         "name": "InstanceActive",
         "caption": "activate Instance"
         },
@@ -141,23 +137,6 @@
                             }
                         ]
                     },
-                    {
-                        "type": "RowLayout",
-                        "items": [
-                            {
-                                "type": "SelectColor",
-                                "allowTransparent": "false",
-                                "name": "HTML_BGCstartG_Current",
-                                "caption": "start gradient (current bar)"
-                            },
-                            {
-                                "type": "SelectColor",
-                                "allowTransparent": "false",
-                                "name": "HTML_BGCstopG_Current",
-                                "caption": "stop gradient (current bar)"
-                            }
-                        ]
-                    },
                     {   "type": "CheckBox",
                         "name": "HTML_MarkPriceLevel",
                         "caption": "show Tibber price level indicator",
@@ -232,16 +211,6 @@
                                 "type": "CheckBox",
                                 "name": "HTML_Bar_Price_vis_ct",
                                 "caption": "show ct suffix"
-                            },
-                            {
-                                "type": "CheckBox",
-                                "name": "HTML_Bar_Show_Prices",
-                                "caption": "show prices in bars"
-                            },
-                            {
-                                "type": "CheckBox",
-                                "name": "HTML_Show_Grid",
-                                "caption": "show gridlines and prices"
                             }
                         ]
                     }                                        
@@ -390,11 +359,6 @@
             "type": "Button",
             "label": "Reset HTML settings",
             "onClick": "IPS_RequestAction($id, 'ResetHTML', '');"
-          },
-          {
-            "type": "Button",
-            "label": "Reload visualization",
-            "onClick": "IPS_RequestAction($id, 'reload', '');"
           }
     ],
     "status": [
