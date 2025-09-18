@@ -38,6 +38,7 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyString("Token", '');
 			$this->RegisterPropertyString("Api", 'https://api.tibber.com/v1-beta/gql');
 			$this->RegisterPropertyString("Home_ID",'0');
+			$this->RegisterPropertyBoolean("Price_log", false);
 			$this->RegisterPropertyBoolean("Price_Variables", false);
 			$this->RegisterPropertyBoolean("Price_Variables_15m", false);
 			// Globaler Schalter: 15-Minuten-Preise aktivieren
@@ -583,6 +584,92 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->Update_Ahead_Price_Data();
 			//$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
 
+			// Optional: write day-ahead prices to archive when enabled
+			if ($this->ReadPropertyBoolean('Price_log') == true){
+				$this->LogAheadPrices($result_array);
+			}
+
+		}
+
+		private function SetLogging()
+		{
+			$archive_handler = '{43192F0B-135B-4CE7-A0A7-1475603F3060}';  //ARchive Handler ermitteln
+			$ar = IPS_GetInstanceListByModuleID($archive_handler);
+			$ar_id = intval($ar[0] ?? 0);
+			$this->WriteAttributeInteger("ar_handler", $ar_id);
+
+			if ($ar_id > 0){
+				$status = @AC_GetLoggingStatus($ar_id, @$this->GetIDForIdent("Ahead_Price"));
+				if ($status == false){
+					@AC_SetLoggingStatus($ar_id,$this->GetIDForIdent("Ahead_Price"), true );
+				}
+				unset($status);
+				
+				$status = @AC_GetLoggingStatus($ar_id, @$this->GetIDForIdent("act_price"));
+				if ($status == false){
+					@AC_SetLoggingStatus($ar_id,$this->GetIDForIdent("act_price"), true );
+				}
+				unset($status);
+			}
+			
+			$this->CreateAheadChart();
+		}
+
+		private function CreateAheadChart()
+		{
+			if (!@$this->GetIDForIdent('TIBV2_Day_Ahead_Chart')){
+				$var = $this->GetIDForIdent('Ahead_Price');
+				if (!$var) { return; }
+				$id = IPS_CreateMedia(4);
+				IPS_SetParent($id,  $this->InstanceID);
+				$payload = '{"datasets":[{"variableID":'.$var.',"fillColor":"#669c35","strokeColor":"#77bb41","timeOffset":-2,"visible":true,"title":"Preis Heute","type":"bar","side":"left"},{"variableID":'.$var.',"fillColor":"#f2f7b7","strokeColor":"#f2f7b7","timeOffset":-1,"visible":true,"title":"Preis Morgen","type":"bar","side":"left"}]}'
+				;
+				IPS_SetMediaFile($id,IPS_GetKernelDir().join(DIRECTORY_SEPARATOR, array("media", $id.".chart")),0);
+				IPS_SetMediaContent($id, base64_encode($payload));
+				IPS_SetName($id,'Day Ahead Chart');	
+				IPS_SetIdent($id, 'TIBV2_Day_Ahead_Chart') ;
+				IPS_SetPosition($id, 200);
+			}
+		}
+
+		private function LogAheadPrices(array $result_array)
+		{
+			// ensure target variable and archive exist
+			$varID = @$this->GetIDForIdent('Ahead_Price');
+			if (!$varID) { return; }
+			$ar_id = intval($this->ReadAttributeInteger('ar_handler'));
+			if ($ar_id <= 0) {
+				$archive_handler = '{43192F0B-135B-4CE7-A0A7-1475603F3060}';
+				$ar = @IPS_GetInstanceListByModuleID($archive_handler);
+				if (is_array($ar) && count($ar) > 0) {
+					$ar_id = intval($ar[0]);
+					$this->WriteAttributeInteger('ar_handler', $ar_id);
+				} else { return; }
+			}
+
+			date_default_timezone_set('Europe/Berlin');
+			$start = mktime(0, 0, 0, intval( date("m") ) , intval(date("d")-2), intval(date("Y")));
+			$end = mktime(23, 59, 59, intval( date("m") ) , intval(date("d")-1), intval(date("Y")));
+
+			@AC_DeleteVariableData($ar_id, $varID, $start, $end);
+
+			foreach ($result_array as $res){
+				if (!isset($res['Ident'], $res['Price'])) { continue; }
+				$ident = $res['Ident'];
+				$hour = intval(substr($ident, 9));
+				$dayFlag = substr($ident, 7, 1);
+				if ($dayFlag == '0'){
+					@AC_AddLoggedValues($ar_id, $varID, [[ 'TimeStamp' => mktime($hour, 0, 1, intval(date('m')), intval(date('d')-2), intval(date('Y'))), 'Value' => $res['Price'] ]]);
+				}
+				elseif ($dayFlag == '1'){
+					@AC_AddLoggedValues($ar_id, $varID, [[ 'TimeStamp' => mktime($hour, 0, 1, intval(date('m')), intval(date('d')-1), intval(date('Y'))), 'Value' => $res['Price'] ]]);
+				}
+			}
+			$count = count($result_array);
+			if ($count <= self::HTML_Max_HourAhead){
+				@AC_AddLoggedValues($ar_id, $varID, [[ 'TimeStamp' => mktime(0, 0, 1, intval(date('m')), intval(date('d')-1), intval(date('Y'))), 'Value' => 0 ]]);
+			}
+			@AC_ReAggregateVariable($ar_id, $varID);
 		}
 
         private function Update_Ahead_Price_Data()
@@ -1018,6 +1105,12 @@ require_once __DIR__ . '/../libs/functions.php';
 			{
 				$this->UnregisterVariable('Ahead_Price_Data_60m');
 				$this->UnregisterVariable('Ahead_Price_Data_15m');
+			}
+
+			// Day-ahead helper + logging to archive
+			if ($this->ReadPropertyBoolean('Price_log') == true){
+				$this->RegisterVariableFloat("Ahead_Price", $this->Translate('day ahead price helper variable'), 'Tibber.price.cent', 0);
+				$this->SetLogging();
 			}
 
 			// Statistic

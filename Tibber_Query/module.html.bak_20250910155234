@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            overflow: auto;
+            color: var(--content-color, var(--font-color));
+        }
+
+        #block {
+            height: 100%;
+            max-height: 100%;
+        }
+
+        #bars {
+            display: flex;
+            align-items: flex-end;
+            height: calc(98% - 20px - 20px);
+        }
+
+        #prices {
+            height: 20px;
+            margin-left: 5px;
+            font-size: var(--FontSizePrices);
+        }
+
+        #bars > div {
+            flex: var(--HourAhead);
+            margin-bottom: 1px;
+            margin-left: 1px;
+            margin-right: 1px;
+            text-align: right;
+            font-size: var(--FontSizeBars);
+            writing-mode: vertical-lr;
+            color: var(--FCBars);
+            border-top-left-radius: var(--BorderRadius);
+            border-top-right-radius: var(--BorderRadius);
+            display: flex;
+            align-items: center;
+            justify-content: end;
+            text-overflow: clip; 
+            white-space: nowrap; 
+            background-image: var(--Gradient);
+        }
+
+        #hours {
+            display: flex;
+            margin-bottom: 5px;
+            margin-top: 5px;
+            text-align: var(--TextAlignHours);
+            font-size: var(--FontSizeHours);
+        }
+
+        #hours > div {
+            flex: var(--HourAhead);
+            margin-left: 1px;
+            margin-right: 1px;
+            writing-mode: var(--WriteMode);
+        }
+
+        #hours > div.current {
+            background-color: var(--BGCHour);
+            border-radius: 3px;
+        }
+    </style>
+  <!--             color: var(--FCHourDefault);
+
+                color: var(--FCHour);
+ -->
+
+</head>
+<body>
+    <div id="block">
+        <div id="bars">
+            <!-- Will be filled through JavaScript -->
+        </div>
+        <div id="hours">
+            <!-- Will be filled through JavaScript -->
+        </div>
+        <div id="prices">  
+            <span>Aktuell: <span id="price_cur"></span></span>
+            <span style="color: green;">&nbsp;&nbsp;&nbsp;&darr; <span id="price_min">&nbsp;ct</span></span>
+            <span style="color: red;">&nbsp;&nbsp;&nbsp;&uarr; <span id="price_max">&nbsp;ct</span></span>
+            <span>&nbsp;&nbsp;&nbsp;&Oslash;<span id="price_avg">&nbsp;ct</span></span>
+
+        </div>
+    </div>
+    <script type="text/javascript" charset="UTF-8">
+
+
+        let BarGradient;
+        let BarColor;
+        let HourAhead;
+        let UseSkinColor;
+        let UseDefaultColorHour;
+
+        document.documentElement.style.setProperty('--font-color', queryParameters.get('textcolor'));
+
+        let bars = document.getElementById("bars");
+        for(let i = 0; i < 48; i++) {
+            let bar = document.createElement('div');
+            bar.id = 'bar_' + i;
+            bar.innerHTML = 'xx,xx&nbsp;&nbsp;';
+            bar.style.height = Math.floor(Math.random() * 200);
+            bars.appendChild(bar);
+        }
+        let hours = document.getElementById("hours");
+        for(let i = 0; i < 48; i++) {
+            let hour = document.createElement('div');
+            hour.id = 'hour_' + i;
+            hour.innerHTML = i;
+            hour.id.className = i;
+            hours.appendChild(hour);
+        }
+
+        function handleMessage(message) {
+            
+              
+         /*   for(let i = 0; i < 48; i++) {
+                //document.getElementById('hour_' + i).className = "";
+                document.getElementById('hour_' + i).className = i;
+            }
+  */
+            let min_price = Number.MAX_VALUE;
+            let max_price = Number.MIN_VALUE;
+            let avg_price = 0;
+            
+            let hours = document.getElementById("hours");
+            
+            const currentHour = new Date().getHours();
+            const data = JSON.parse(message);
+
+            for (const parameter in data) {
+            
+            const element = document.getElementById(parameter);
+            var root = document.documentElement;
+
+                // Abhängig vom Parameter werden allerdings verschiedene Werte angepasst
+                switch (parameter) {
+                    case 'price_cur':
+                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                    break;
+                    case 'price_min':
+                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                    break;
+                    case 'price_max':
+                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                    break;
+                    case 'price_avg':
+                        element.innerHTML = data[parameter] + '&nbsp;ct';
+                    break;
+                    case 'bar_price_round':
+                        BarPriceRound = data[parameter];
+                    break;
+                    case 'bar_price_vis_ct':
+                   
+                    VisCent = '&nbsp;&nbsp;';
+                    if(data[parameter] == true )
+                        {
+                            VisCent = ' ct&nbsp;&nbsp;';
+                        }
+                    break;
+                    case 'FontSizeBars':
+                       root.style.setProperty('--FontSizeBars', 'clamp('+data[parameter]+')');
+                    break;
+                    case 'FontSizeHours':
+                       root.style.setProperty('--FontSizeHours', 'clamp('+data[parameter]+')');
+                    break;
+                    case 'FontSizePrices':
+                       root.style.setProperty('--FontSizePrices', 'clamp('+data[parameter]+')');
+                    break;
+                    case 'FCBars':
+                        root.style.setProperty('--FCBars', '#'+data[parameter]);
+                        BarColor = '#'+data[parameter];
+                    break;  
+                    case 'FCHour':
+                        root.style.setProperty('--FCHour', '#'+data[parameter]);
+                        UseCurrentColorHour = '#'+data[parameter];
+
+                    break;
+                    case 'BGCHour':
+                        root.style.setProperty('--BGCHour', '#'+data[parameter]);
+                    break;
+                    case 'FCHourDefault':
+                        if (data[parameter]){
+                            document.documentElement.style.setProperty('--content-color', '#'+data[parameter] );
+                            console.log("Use fontcolors: #" +data[parameter]);
+                        }
+                    break;
+                    case 'BorderRadius':
+                        root.style.setProperty('--BorderRadius', data[parameter] + 'px');
+                    break;
+                    case 'Scale':
+                        Scale =  data[parameter];
+                    break;
+                    case 'hour_write_mode':
+                        root.style.setProperty('--WriteMode','horizontal-tb');
+                        root.style.setProperty('--TextAlignHours','center');
+                       if(data[parameter] == true )
+                            {
+                                root.style.setProperty('--WriteMode','vertical-lr');
+                                root.style.setProperty('--TextAlignHours','left');
+                            }
+                        break;
+                    case 'NoData':
+                            if(Object.keys(data[parameter]).length >=1 )
+                            {
+                                document.getElementById('block').innerHTML = data[parameter];
+                                document.getElementById('block').style.color = "red";
+                                console.log(NoData);
+                            }
+                    break; 
+                    case 'Gradient':
+                        root.style.setProperty('--Gradient', 'linear-gradient(to top,'+data[parameter]+')');
+                        BarGradient = 'linear-gradient(to top,'+data[parameter]+')';
+                        console.log(BarGradient);
+                    break;
+                    case 'MarkPriceLevel':
+                        MarkPriceLevel = data[parameter];
+                    break;
+                    case 'BGCPriceVC':
+                        BGCPriceVC = data[parameter];
+                    break; 
+                    case 'BGCPriceC':
+                        BGCPriceC = data[parameter];
+                    break; 
+                    case 'BGCPriceN':
+                        BGCPriceN = data[parameter];
+                    break; 
+                    case 'BGCPriceE':
+                        BGCPriceE = data[parameter];
+                    break; 
+                    case 'BGCPriceVE':
+                        BGCPriceVE = data[parameter];
+                    break; 
+                    case 'PriceLevelThickness':
+                        PriceLevelThickness = data[parameter];
+                    break;
+                    case 'HourAhead':
+                        HourAhead = data[parameter];
+                        root.style.setProperty('--HourAhead', '0 0 calc((98% - (24px * 2)) / '+HourAhead+')');
+                    break; 
+                                        
+                    case 'Ahead_Price_Data':
+
+                       let index = 0;
+                       let CurrentHourIndex = 0;
+
+                       for(let row of data[parameter]) {
+                                let hour = (new Date(row.start*1000)).getHours();
+                                console.log(row.start, hour, row.price);
+
+                                let barindex = document.getElementById('bar_' + index);
+                                let hourindex = document.getElementById('hour_' + index);
+
+                                hourindex.innerText = hour;
+
+                                // only one CurrentHour exist
+                                if(CurrentHourIndex === 0 ){
+                                    if (currentHour === hour) {
+                                        hourindex.className = "current";
+                                        hourindex.style.color = UseCurrentColorHour;
+                                        document.getElementById('price_cur').innerHTML = row.price.toFixed(2) + " ct";
+                                    }
+                                    CurrentHourIndex++;
+                                }
+
+                                // if bar is zero make transparency bar
+
+                                if (row.price === 0) {
+                                    barindex.style.height = '100%';
+                                    barindex.style.opacity = '0.1'; // Setzt die Transparenz des spezifischen bar-Elements auf 10%
+                                    barindex.style.backgroundImage = 'linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 100%)';
+                                    barindex.style.color = '#FFFFFF';
+                                } else {
+                                    barindex.style.height = Math.floor( 100 - ((data['price_max'] - row.price) *100)/(data['price_max']-(data['price_min'] - Scale)) ) + '%';
+                                    barindex.style.opacity = '1'; // Setzt die Transparenz des spezifischen bar-Elements auf 10%
+                                    barindex.style.backgroundImage = BarGradient;
+                                    barindex.style.color = BarColor;
+                                }   
+                                barindex.innerHTML = row.price.toFixed(BarPriceRound)+ VisCent;
+
+                                if (MarkPriceLevel) {
+                                    switch (row.level){
+                                        case 'NORMAL':
+                                            barindex.style.borderBottom = PriceLevelThickness+'px solid '+BGCPriceN;
+                                        break;
+                                        case 'CHEAP':
+                                            barindex.style.borderBottom = PriceLevelThickness+'px solid '+BGCPriceC;
+                                        break;
+                                        case 'VERY_CHEAP':
+                                            barindex.style.borderBottom = PriceLevelThickness+'px solid '+BGCPriceVC;
+                                        break;
+                                        case 'EXPENSIVE':
+                                            barindex.style.borderBottom = PriceLevelThickness+'px solid '+BGCPriceE;
+                                        break;
+                                        case 'VERY_EXPENSIVE':
+                                            barindex.style.borderBottom = PriceLevelThickness+'px solid '+BGCPriceVE;
+                                        break;
+                                    }
+                                }
+                            
+                               index++;                               
+                            }
+
+                            //remove obselte rows
+                           // console.log("HouraHead " + HourAhead + " Index " + index);
+                            if (HourAhead <= index) {
+                                    //reverse counter
+                                   for(let i = 47; i >=  HourAhead; i--) 
+                                   {
+                                        let barindex = document.getElementById('bar_' + i);
+                                        let hourindex = document.getElementById('hour_' + i);
+
+                                        if (barindex){
+                                            barindex.remove();
+                                        }
+                                        if (hourindex){
+                                            hourindex.remove();
+                                        }
+                                   }
+                                } 
+                           
+                        break;
+                        case 'reload':
+                            location.reload();
+                            console.log('location reload: ', parameter);
+
+                        break;
+                        default:
+                            console.log('Unknown parameter: ', parameter);
+                        
+                }
+
+         }
+            
+        }
+    </script>
+</body>
+</html>

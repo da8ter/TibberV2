@@ -13,10 +13,10 @@ Mit diesem Modul können die Informationen abgerufen werden welche von der Tibbe
 
 ### 1. Funktionsumfang
 
-* Auslesen aktueller Preis
+* Auslesen aktueller Preis (Stundenpreise und 15-Minuten Preise)
 * Auslesen aktueller Preis Level (sehr günstig, günstig, normal, teuer, sehr teuer)
-* Preisvorschau als Chart
-* Variablen pro Stunden anlegen für den heutigen und morgigen Tag
+* Preisvorschau als Chart und als HMML Kachel in der Kachelvisualisierung
+* Variablen pro Stunden und/oder 15-Minuten anlegen für den heutigen und morgigen Tag
 * Array zur Verwendung in eigene Anwendungen und Scripten.
  
 ### 2. Voraussetzungen
@@ -28,7 +28,7 @@ Mit diesem Modul können die Informationen abgerufen werden welche von der Tibbe
 ### 3. Software-Installation
 
 * Über den Module Store das 'Tibber V.2'-Modul installieren.
-* Alternativ über das Module Control folgende URL hinzufügen https://github.com/lorbetzki/net.lorbetzki.tibber.v2.git
+* Alternativ über das Module Control folgende URL hinzufügen https://github.com/da8ter/TibberV2.git
 
 ### 4. Einrichten der Instanzen in IP-Symcon
 
@@ -39,11 +39,12 @@ __Konfigurationsseite__:
 
 Name          				     | Beschreibung
 -------------------------------- | -------------------------------------------------------
-aktiviere Instanz | aktivieren der Instanz
+15-Minuten-Preise aktivieren | Schaltet von Stundenpreis auf 15-Minutenpreis um.
 Benutzer Token | Access-Token aus der Tibber API eintragen
 Heim auswählen | Nachdem der Token eingetragen und die Änderung übernommen wurde, werden hier die im Account gespeicherten Heime aufgeführt. Wählt das, welches Ihr abfragen möchtet
 Preisdatenvariablen loggen | Diese Checkbox muss aktiviert werden, wenn die Day Ahead Preise im Archiv gespeichert sowie der Multi-Chart erzeugt werden sollen. [1] 
 Preisvariablen pro Stunde anlegen | Wird diese Checkbox aktivert, werden 48 Variablen ( 24 für den aktuellen Tag und 24 für den Folgetag) für jede Stunde angelegt, welche beim Abruf der Day Ahead Preise aktualisiert werden.
+Preisvariablen pro je 15 Minuten anlegen | Wird diese Checkbox aktivert, werden 192 Variablen ( 96 für den aktuellen Tag und 96 für den Folgetag) angelegt, welche beim Abruf der Day Ahead Preise aktualisiert werden.
 einige Statistiken | erstellt Variablen mit ein paar statistischen werten.
 erstelle variable für Energie optimierer | Variable um in einer zukünftiger Version des Symcon Energie Optimierers weiter zu verwenden
 Schriftfarbe Balken | ändert die Schriftfarbe innerhalb der Balken
@@ -52,12 +53,16 @@ Hintergrundfarbe der aktuellen Stunde | ändert die Hintergrundfarbe der aktuell
 Legen Sie die Skala des Balkens fest, Werte zwischen 1-10 sind zulässig. | passt die höhe der Balken an, um differnzen größer wirken zu lassen
 Beginn Farbverlauf | damit lässt sich der untere Teil der Balken farblich den eigenen wünschen anpassen
 Ende Farbverlauf | damit lässt sich der obere Teil der Balken farblich den eigenen wünschen anpassen
+Beginn Farbverlauf aktueller Balken | damit lässt sich der untere Teil des aktuellen Balken farblich den eigenen wünschen anpassen
+Ende Farbverlauf aktueller Balken | damit lässt sich der obere Teil des aktuellen Balken farblich den eigenen wünschen anpassen
 zeige Tibber Preislevel Indikator | zeigt eine Markierung am unteren Ende der Balken mit dem aktuellen Tibber Preislevel
 dicke der Markierung in px | hiermit kann man die Markierung in deren Dicke anpassen
 Farbe für Level sehr günstig, günstig, normal, teuer, sehr teuer | anpassen der Farbe für die jeweiligen Level nach eigenen Bedürfniss
 setze Balkenradius | passt den Radius der Balken an
 anzeige der Nachkommastelle | zeigt im Balken den Preis mit 1, 2 oder 0 Nachommastellen an
 Zeige cent als Suffix | zeigt im Balken ct ans suffix an oder nicht
+Zeige Preise in den Balken | zeigt die Preise in den Balken an
+Rasterlinien und Preise anzeigen | zeigt Rasterlinien und eine Preisskala an
 
 Schriftgröße Balken, Stunde, Preise min, standard, max | hier kann man die mindest und maximalst größe in Abhängigkeit der Viewport-Breite anpassen. 1VW (Viewport-Width) entspricht dabei 1% der Breite des Viewports.
 
@@ -181,6 +186,5 @@ Beispiel:
 `TIBV2_PriceArray(12345);`
 
 ### 7. Symcon Kachel
-Mit der Version 2 von diesem Modul gibt es auch eine Preisvorschau Kachel. Um diese in der Visu anzeigen zu können wird nur ein Link der Tibber Query Instanz in der Visu Kategorie benötigt. Meinen Dank geht an [Da8ter](https://github.com/da8ter) Kachelsammlung.
-![grafik](../docs/preview.png?raw=true)
+Mit der Version 2 von diesem Modul gibt es auch eine Preisvorschau Kachel. Um diese in der Visu anzeigen zu können wird nur ein Link der Tibber Query Instanz in der Visu Kategorie benötigt.
 

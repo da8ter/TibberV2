@@ -7,7 +7,8 @@
         },
         {   "type": "CheckBox",
             "name": "DemoMode",
-            "caption": "Demo mode (simulate 15-minute data)"
+            "caption": "Demo mode (simulate 15-minute data)",
+            "visible": false
         },
         {   "type": "CheckBox",
         "name": "InstanceActive",
@@ -32,6 +33,12 @@
             "caption": "Price Data -> Variable Settings",
             "expanded": false,
             "items": [
+                    {   "type": "CheckBox",
+                        "name": "Price_log",
+                        "caption": "Log price data variable",
+                        "visible": true,
+                        "enabled": true
+                    },
                     {   "type": "CheckBox",
                         "name": "Price_Variables",
                         "caption": "Price - create variables per hour (24 for current day & 24 for day ahead day)",
