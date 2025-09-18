@@ -517,11 +517,30 @@
                            if (!hEl) {
                                hEl = document.createElement('div');
                                hEl.id = 'hour_' + h;
-                               hEl.innerHTML = h;
-                               hEl.className = h;
+                               hEl.className = '';
                                hoursContainer.appendChild(hEl);
-                           } else {
-                               hEl.style.display = '';
+                           }
+                           hEl.style.display = '';
+                       }
+                       // Nicht benötigte alte Labels ausblenden
+                       for (let h = hoursToShow; h < 96; h++) {
+                           const extra = document.getElementById('hour_' + h);
+                           if (extra) extra.style.display = 'none';
+                       }
+
+                       // Startstunde ermitteln: aus Datensatz (erster Eintrag) oder aktuelle Stunde
+                       let displayStartHour = (Array.isArray(dataset) && dataset.length > 0 && dataset[0] && typeof dataset[0].start === 'number')
+                           ? (new Date(dataset[0].start * 1000)).getHours()
+                           : (new Date()).getHours();
+                       // Stunden-Labels für das gesamte Fenster setzen (mit Wrap um 24)
+                       for (let h = 0; h < hoursToShow; h++) {
+                           const hEl = document.getElementById('hour_' + h);
+                           if (hEl) {
+                               const lbl = (displayStartHour + h) % 24;
+                               hEl.innerText = lbl;
+                               // Reset Klasse/Farbe; Hervorhebung erfolgt später
+                               hEl.className = '';
+                               hEl.style.color = '';
                            }
                        }
 
@@ -571,11 +590,10 @@
                             // Standardmäßig keine aktuelle-Stunde-Markierung
                             try { barindex.classList.remove('current-hour'); } catch(e) { /* ignore */ }
                             const hourindex = document.getElementById('hour_' + hourIndex);
-
-                            const hour = (row && row.start) ? (new Date(row.start*1000)).getHours() : ((new Date()).getHours() + hourIndex) % 24;
+                            // Stunde aus dem Datensatz bestimmen (falls vorhanden), ansonsten vom vorberechneten Label nehmen
+                            const hour = (row && row.start) ? (new Date(row.start*1000)).getHours() : ((displayStartHour + hourIndex) % 24);
                             if (hourindex) {
-                                // Stundenlabel zeigt nur die Stunde; Durchschnitt im Overlay
-                                hourindex.innerText = hour;
+                                // Label wurde oben bereits gesetzt; hier nur ggf. Hervorhebung aktualisieren
                                 if (hour === currentHourNow) {
                                     hourindex.className = "current";
                                     hourindex.style.color = UseCurrentColorHour;
