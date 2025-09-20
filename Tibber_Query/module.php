@@ -68,6 +68,11 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyInteger("HTML_FontSizeMaxP", self::HTML_FontSizeMax);
 			$this->RegisterPropertyInteger("HTML_FontSizeDefP", self::HTML_FontSizeDef);
 
+			// separate font-size for price scale (overlay grid labels)
+			$this->RegisterPropertyInteger("HTML_FontSizeMinS", self::HTML_FontSizeMin);
+			$this->RegisterPropertyInteger("HTML_FontSizeMaxS", self::HTML_FontSizeMax);
+			$this->RegisterPropertyInteger("HTML_FontSizeDefS", self::HTML_FontSizeDef);
+
 			$this->RegisterPropertyInteger("HTML_FontColorBars", self::HTML_Color_White);
 			$this->RegisterPropertyInteger("HTML_FontColorHour", self::HTML_Color_White);
 			
@@ -95,7 +100,7 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyInteger("HTML_Bar_Price_Round", self::HTML_Bar_Price_Round);
 			$this->RegisterPropertyBoolean("HTML_Bar_Price_vis_ct", self::HTML_Bar_Price_vis_ct);
 			$this->RegisterPropertyBoolean("HTML_Bar_Show_Prices", true);
-			$this->RegisterPropertyBoolean("HTML_Show_Grid", true);
+			$this->RegisterPropertyBoolean("HTML_Show_Grid", false);
 			
 			$this->RegisterPropertyBoolean("HTML_Hour_WriteMode", self::HTML_Hour_WriteMode);
 
@@ -469,6 +474,14 @@ require_once __DIR__ . '/../libs/functions.php';
                     }
                     $groups[$keyH]['sumCt'] += ($row['total'] * 100);
                     $groups[$keyH]['cnt'] += 1;
+                    // write direct quarter-hourly variable for TODAY (T0)
+					if ($this->ReadPropertyBoolean('Price_Variables_15m')) {
+						$hQ = intval(date('G', $st));
+						$mQ = intval(date('i', $st));
+						$segQ = intdiv($mQ, 15);
+						$idxQ = ($hQ * 4) + $segQ; // 0..95
+						$this->SetPriceVariables('PT15M_T0_' . $idxQ, $row);
+					}
                     // collect raw quarter-hourly (cent)
                     $rawQ[] = [
                         'start' => $st,
@@ -521,6 +534,14 @@ require_once __DIR__ . '/../libs/functions.php';
                     }
                     $groups[$keyH]['sumCt'] += ($row['total'] * 100);
                     $groups[$keyH]['cnt'] += 1;
+                    // write direct quarter-hourly variable for TOMORROW (T1)
+					if ($this->ReadPropertyBoolean('Price_Variables_15m')) {
+						$hQ = intval(date('G', $st));
+						$mQ = intval(date('i', $st));
+						$segQ = intdiv($mQ, 15);
+						$idxQ = ($hQ * 4) + $segQ; // 0..95
+						$this->SetPriceVariables('PT15M_T1_' . $idxQ, $row);
+					}
                     // collect raw quarter-hourly (cent)
                     $rawQ[] = [
                         'start' => $st,
@@ -798,58 +819,41 @@ require_once __DIR__ . '/../libs/functions.php';
                         if (count($AVGPrice) >= $hoursToShow) { break; }
                     }
                 } else {
-                    // Fallback to hourly array and optional split
+                    // Fallback: Stundenbalken exakt zeitbasiert ab aktueller Stunde ausrichten
                     $items = json_decode($this->ReadAttributeString('Price_Array'), true);
                     if (!is_array($items)) { return; }
-                    // detect bars per hour
+                    // barsPerHour erkennen (1=Stunde, 4=15-min)
                     $barsPerHour = 1;
-                    if (count($items) >= 2 && isset($items[0]['start'], $items[0]['end'], $items[1]['start'])){
+                    if (count($items) >= 2 && isset($items[0]['start'], $items[0]['end'])){
                         $dt = ($items[0]['end'] - $items[0]['start']);
                         if ($dt >= 899 && $dt <= 901) { $barsPerHour = 4; }
                     }
-                    $nowH = intval(date('G'));
-                    // Start always at the beginning of the current hour for 15-minute view
-                    $thresholdIndex = ($barsPerHour == 4) ? ($nowH * 4) : $nowH;
-                    $startIdx = max(0, $thresholdIndex);
-                    $endIdx = count($items) - 1;
-                    $outputBarsPerHour = $barsPerHour;
-                    $barsLimit = $hoursToShow * $outputBarsPerHour;
-                    $barsAdded = 0;
-                    $hourSums = [];
-                    $hourCounts = [];
-                    for ($i = $startIdx; $i <= $endIdx; $i++){
-                        if ($barsAdded >= $barsLimit) { break; }
-                        $value = $items[$i];
-                        $valueStart = isset($value['start']) ? $value['start'] : ($i > 0 ? ($items[$i-1]['end'] ?? time()) : time());
-                        $valueEnd   = isset($value['end'])   ? $value['end']   : ($valueStart + 3600);
-                        $duration   = $valueEnd - $valueStart;
-                        $valuePrice = isset($value['Price']) ? $value['Price'] : 0;
-                        $valueLevel = isset($value['Level']) ? $value['Level'] : '';
-                        $hourKey = date('YmdH', $valueStart);
-                        if (!isset($hourSums[$hourKey])) { $hourSums[$hourKey]=0; $hourCounts[$hourKey]=0; }
-                        if ($duration >= 3599) {
-                            $hourSums[$hourKey] += $valuePrice;
-                            $hourCounts[$hourKey] += 1;
-                            $Ahead_Price_Data[] = [ 'start'=>$valueStart, 'end'=>$valueEnd, 'price'=>round($valuePrice,2), 'level'=>$valueLevel ];
-                            $barsAdded++;
+                    // Map für schnellen Zugriff per Startzeit
+                    $byStart = [];
+                    foreach ($items as $row){
+                        if (!isset($row['start'])) continue;
+                        $byStart[intval($row['start'])] = [
+                            'price' => isset($row['Price']) ? floatval($row['Price']) : 0.0,
+                            'level' => isset($row['Level']) ? strval($row['Level']) : ''
+                        ];
+                    }
+                    // Ab aktueller Stunde exakt ein Stundenbalken pro Stunde generieren
+                    $startHour = $nowSec - ($nowSec % 3600);
+                    $AVGPrice = [];
+                    for ($h=0; $h<$hoursToShow; $h++){
+                        $st = $startHour + ($h * 3600);
+                        $en = $st + 3600;
+                        if (isset($byStart[$st])){
+                            $p = round($byStart[$st]['price'], 2);
+                            $lvl = $byStart[$st]['level'];
+                            $Ahead_Price_Data[] = [ 'start'=>$st, 'end'=>$en, 'price'=>$p, 'level'=>$lvl ];
+                            $AVGPrice[] = $p;
                         } else {
-                            $hourSums[$hourKey] += $valuePrice;
-                            $hourCounts[$hourKey] += 1;
-                            $Ahead_Price_Data[] = [ 'start'=>$valueStart, 'end'=>$valueEnd, 'price'=>round($valuePrice,2), 'level'=>$valueLevel ];
-                            $barsAdded++;
+                            // Kein Wert vorhanden -> Platzhalter 0 ct und leeres Level
+                            $Ahead_Price_Data[] = [ 'start'=>$st, 'end'=>$en, 'price'=>0.0, 'level'=>''];
+                            $AVGPrice[] = 0.0;
                         }
                     }
-                    $avg = [];
-                    $seen = [];
-                    for ($i = $startIdx; $i < $startIdx + ($hoursToShow * max(1,$barsPerHour)) && $i < count($items); $i++){
-                        $hk = date('YmdH', isset($items[$i]['start']) ? $items[$i]['start'] : time());
-                        if (isset($seen[$hk])) { continue; }
-                        $seen[$hk] = true;
-                        if (isset($hourCounts[$hk]) && $hourCounts[$hk] > 0){
-                            $avg[] = round($hourSums[$hk] / $hourCounts[$hk], 2);
-                        }
-                    }
-                    $AVGPrice = $avg;
                 }
 
                 $this->WriteAttributeString('AVGPrice', json_encode($AVGPrice));
@@ -1037,10 +1041,10 @@ require_once __DIR__ . '/../libs/functions.php';
 		{
 			if ($this->ReadPropertyBoolean('Price_Variables')){
 				for ($i = 0; $i <= 23; $i++) {
-					$this->RegisterVariableFloat("PT60M_T0_" . $i, $this->Translate('Today')." ". $i ." ". $this->Translate('to')." ". ($i + 1) . " ". $this->Translate('h'), "Tibber.price.cent", 20 + $i);
+					$this->RegisterVariableFloat("PT60M_T0_" . $i, $this->Translate('Today')." ". $i ." ". $this->Translate('to')." ". ($i + 1) . " ". $this->Translate('h'), "Tibber.price.cent", 300 + $i);
 				}
 				for ($i = 0; $i <= 23; $i++) {
-					$this->RegisterVariableFloat("PT60M_T1_" . $i, $this->Translate('Tomorrow')." ". $i ." ". $this->Translate('to')." ". ($i + 1) . " ". $this->Translate('h'), "Tibber.price.cent", 50 + $i);
+					$this->RegisterVariableFloat("PT60M_T1_" . $i, $this->Translate('Tomorrow')." ". $i ." ". $this->Translate('to')." ". ($i + 1) . " ". $this->Translate('h'), "Tibber.price.cent", 330 + $i);
 				}
 			} 
 			else
@@ -1069,7 +1073,7 @@ require_once __DIR__ . '/../libs/functions.php';
 					$hEnd = ($h + intdiv($m1, 60)) % 24; // hour rollover
 					$mEnd = $m1 % 60;               // minute rollover
 					$label = sprintf('%s %02d:%02d %s %02d:%02d', $this->Translate('Today'), $h, $m0, $this->Translate('to'), $hEnd, $mEnd);
-					$this->RegisterVariableFloat("PT15M_T0_" . $i, $label, "Tibber.price.cent", 100 + $i);
+					$this->RegisterVariableFloat("PT15M_T0_" . $i, $label, "Tibber.price.cent", 400 + $i);
 				}
 				// Tomorrow (T1)
 				for ($i = 0; $i <= 95; $i++) {
@@ -1079,7 +1083,7 @@ require_once __DIR__ . '/../libs/functions.php';
 					$hEnd = ($h + intdiv($m1, 60)) % 24;
 					$mEnd = $m1 % 60;
 					$label = sprintf('%s %02d:%02d %s %02d:%02d', $this->Translate('Tomorrow'), $h, $m0, $this->Translate('to'), $hEnd, $mEnd);
-					$this->RegisterVariableFloat("PT15M_T1_" . $i, $label, "Tibber.price.cent", 200 + $i);
+					$this->RegisterVariableFloat("PT15M_T1_" . $i, $label, "Tibber.price.cent", 500 + $i);
 				}
 			}
 			else
@@ -1252,11 +1256,13 @@ require_once __DIR__ . '/../libs/functions.php';
 			$minT1 = INF; $minIdentT1 = '';
 			$maxT1 = -INF; $maxIdentT1 = '';
 			$lvlCountT1 = ['VERY_CHEAP'=>0,'CHEAP'=>0,'NORMAL'=>0,'EXPENSIVE'=>0,'VERY_EXPENSIVE'=>0];
+			$lvlCountAll = ['VERY_CHEAP'=>0,'CHEAP'=>0,'NORMAL'=>0,'EXPENSIVE'=>0,'VERY_EXPENSIVE'=>0];
 			$hasT0 = false; $hasT1 = false;
 			foreach ($Data as $row){
 				if (!isset($row['Ident'])) { continue; }
 				$ident = $row['Ident'];
 				$price = isset($row['Price']) ? floatval($row['Price']) : 0.0;
+				$level = $row['Level'] ?? '';
 				$dayFlag = substr($ident, 7, 1); // '0' or '1'
 				if ($dayFlag === '0'){
 					$hasT0 = true;
@@ -1267,9 +1273,10 @@ require_once __DIR__ . '/../libs/functions.php';
 					$hasT1 = true;
 					if ($price < $minT1) { $minT1 = $price; $minIdentT1 = $ident; }
 					if ($price > $maxT1) { $maxT1 = $price; $maxIdentT1 = $ident; }
-					$level = $row['Level'] ?? '';
 					if (isset($lvlCountT1[$level])) { $lvlCountT1[$level]++; }
 				}
+				// Gesamtzähler unabhängig vom Tag
+				if (isset($lvlCountAll[$level])) { $lvlCountAll[$level]++; }
 			}
 			// HEUTE setzen (falls vorhanden)
 			if ($hasT0 && is_finite($minT0) && is_finite($maxT0)){
@@ -1290,13 +1297,13 @@ require_once __DIR__ . '/../libs/functions.php';
 				$this->SetValue('lowtime', $minHourT1);
 				$this->SetValue('hightime', $maxHourT1);
 				$this->SetValue('minmaxprice', $maxT1 - $minT1);
-				// Levelzählung für morgen
-				$this->SetValue('no_level1', $lvlCountT1['VERY_CHEAP']);
-				$this->SetValue('no_level2', $lvlCountT1['CHEAP']);
-				$this->SetValue('no_level3', $lvlCountT1['NORMAL']);
-				$this->SetValue('no_level4', $lvlCountT1['EXPENSIVE']);
-				$this->SetValue('no_level5', $lvlCountT1['VERY_EXPENSIVE']);
 			}
+			// Setze die Zähler immer (Summe über heute+morgen), damit sie nicht 0 bleiben
+			$this->SetValue('no_level1', $lvlCountAll['VERY_CHEAP']);
+			$this->SetValue('no_level2', $lvlCountAll['CHEAP']);
+			$this->SetValue('no_level3', $lvlCountAll['NORMAL']);
+			$this->SetValue('no_level4', $lvlCountAll['EXPENSIVE']);
+			$this->SetValue('no_level5', $lvlCountAll['VERY_EXPENSIVE']);
 		}
 
 		public function PriceArray()
@@ -1311,39 +1318,45 @@ require_once __DIR__ . '/../libs/functions.php';
             // Add static HTML content from file to make editing easier
             $module = file_get_contents(__DIR__ . '/module.html');
 
-			// Return everything to render our fancy tile!
+            // Return everything to render our fancy tile!
             return $module . $initialHandling;
-        }	
+        }   
 
-		private function GetFullUpdateMessage()
-		{
-			$result = [];
+        private function GetFullUpdateMessage()
+        {
+            $result = [];
 
-			if (!empty($this->ReadAttributeString("AVGPrice")))
-			{
-				$AVGPriceVal			= json_decode($this->ReadAttributeString("AVGPrice"),true);
-				$result['price_avg'] 	= round(array_sum($AVGPriceVal)/count($AVGPriceVal),2);
-				$result['price_min'] 	= round(min($AVGPriceVal),2);
-				$result['price_max'] 	= round(max($AVGPriceVal),2);
-				$result['price_cur'] 	= $AVGPriceVal[0];		
-			}
-			else
-			{
-				$result['NoData'] = $this->Translate('no data available, please check log file for error messages.'); 
-			}
-			$result['FontSizeBars']  	= $this->ReadPropertyInteger("HTML_FontSizeMinB")."px, ".$this->ReadPropertyInteger("HTML_FontSizeDefB")."vw, ".$this->ReadPropertyInteger("HTML_FontSizeMaxB")."px";
-			$result['FontSizeHours']  	= $this->ReadPropertyInteger("HTML_FontSizeMinH")."px, ".$this->ReadPropertyInteger("HTML_FontSizeDefH")."vw, ".$this->ReadPropertyInteger("HTML_FontSizeMaxH")."px";
-			$result['FontSizePrices']  	= $this->ReadPropertyInteger("HTML_FontSizeMinP")."px, ".$this->ReadPropertyInteger("HTML_FontSizeDefP")."vw, ".$this->ReadPropertyInteger("HTML_FontSizeMaxP")."px";
-
-			$result['FCBars'] 	 		= sprintf('%06X', $this->ReadPropertyInteger("HTML_FontColorBars"));
-			$result['FCHour'] 	 		= sprintf('%06X', $this->ReadPropertyInteger("HTML_FontColorHour"));
-
-			if ($this->ReadPropertyBoolean("HTML_FontColorHourDefaultSymcon")){
-				$result['FCHourDefault'] 	 		= sprintf('%06X', $this->ReadPropertyInteger("HTML_FontColorHourDefault"));
-			}
-			else
-			{
-				$result['FCHourDefault'] 	 		= false;
+            if (!empty($this->ReadAttributeString("AVGPrice")))
+            {
+                $AVGPriceVal            = json_decode($this->ReadAttributeString("AVGPrice"),true);
+                // Min/Max direkt aus dem aktuellen Tile-Dataset ermitteln (ohne Statistik-Variablen)
+                // Platzhalter-Zeilen (level === '' oder nodata=true) ignorieren
+                $tile = json_decode($this->ReadAttributeString('Ahead_Price_Data'), true);
+                $vals = [];
+                if (is_array($tile)) {
+                    foreach ($tile as $row) {
+                        $p = isset($row['price']) ? floatval($row['price']) : (isset($row['Price']) ? floatval($row['Price']) : null);
+                        $lvl = isset($row['level']) ? $row['level'] : (isset($row['Level']) ? $row['Level'] : '');
+                        $nd  = isset($row['nodata']) ? (bool)$row['nodata'] : false;
+                        if (is_finite($p) && !$nd && (!is_string($lvl) || $lvl !== '')) {
+                            $vals[] = $p;
+                        }
+                    }
+                }
+                if (!empty($vals)) {
+                    $result['price_min'] = round(min($vals), 2);
+                    $result['price_max'] = round(max($vals), 2);
+                    $result['price_avg'] = round(array_sum($vals)/count($vals), 2);
+                } else {
+                    // Fallback: benutze AVGPrice (kann Platzhalter 0 enthalten)
+                    $filtered = array_values(array_filter($AVGPriceVal, function($v){ return is_finite($v); }));
+                    if (!empty($filtered)) {
+                        $result['price_min'] = round(min($filtered), 2);
+                        $result['price_max'] = round(max($filtered), 2);
+                        $result['price_avg'] = round(array_sum($filtered)/count($filtered), 2);
+                    }
+                }
+                $result['price_cur']    = $AVGPriceVal[0];
 			}
 			
 			$result['BGCHour'] 			= sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorHour"));
@@ -1352,6 +1365,27 @@ require_once __DIR__ . '/../libs/functions.php';
 			$result['Gradient']			= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG"));
 			$result['GradientCurrent']	= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG_Current")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG_Current"));
 			$result['MarkPriceLevel']	= $this->ReadPropertyBoolean("HTML_MarkPriceLevel");
+
+			// Font sizes for Bars / Hours / Prices as CSS clamp triplets
+			$minB = $this->ReadPropertyInteger('HTML_FontSizeMinB');
+			$defB = $this->ReadPropertyInteger('HTML_FontSizeDefB');
+			$maxB = $this->ReadPropertyInteger('HTML_FontSizeMaxB');
+			$result['FontSizeBars']   = $minB."px, ".$defB."vw, ".$maxB."px";
+
+			$minH = $this->ReadPropertyInteger('HTML_FontSizeMinH');
+			$defH = $this->ReadPropertyInteger('HTML_FontSizeDefH');
+			$maxH = $this->ReadPropertyInteger('HTML_FontSizeMaxH');
+			$result['FontSizeHours']  = $minH."px, ".$defH."vw, ".$maxH."px";
+
+			$minP = $this->ReadPropertyInteger('HTML_FontSizeMinP');
+			$defP = $this->ReadPropertyInteger('HTML_FontSizeDefP');
+			$maxP = $this->ReadPropertyInteger('HTML_FontSizeMaxP');
+			$result['FontSizePrices'] = $minP."px, ".$defP."vw, ".$maxP."px";
+
+			$minS = $this->ReadPropertyInteger('HTML_FontSizeMinS');
+			$defS = $this->ReadPropertyInteger('HTML_FontSizeDefS');
+			$maxS = $this->ReadPropertyInteger('HTML_FontSizeMaxS');
+			$result['FontSizeScale']  = $minS."px, ".$defS."vw, ".$maxS."px";
 						
 			$result['BGCPriceVC']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceVC"));
 			$result['BGCPriceC']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceC"));
@@ -1410,7 +1444,7 @@ require_once __DIR__ . '/../libs/functions.php';
 		//allow to reset all HTML Variables to default
 		private function ResetHTML()
 {
-    $defaults = [ 
+    	$defaults = [ 
 				'HTML_FontSizeMinB'=> self::HTML_FontSizeMin,
 				'HTML_FontSizeMaxB'=> self::HTML_FontSizeMax,
 				'HTML_FontSizeDefB'=> self::HTML_FontSizeDef,
@@ -1420,6 +1454,9 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_FontSizeMinP'=> self::HTML_FontSizeMin,
 				'HTML_FontSizeMaxP'=> self::HTML_FontSizeMax,
 				'HTML_FontSizeDefP'=> self::HTML_FontSizeDef,
+				'HTML_FontSizeMinS'=> self::HTML_FontSizeMin,
+				'HTML_FontSizeMaxS'=> self::HTML_FontSizeMax,
+				'HTML_FontSizeDefS'=> self::HTML_FontSizeDef,
 				'HTML_FontColorBars'=> self::HTML_Color_White,
 				'HTML_FontColorHour'=> self::HTML_Color_White,
 				'HTML_FontColorHourDefault'=> self::HTML_Color_Black,

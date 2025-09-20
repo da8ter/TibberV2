@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        :root { --BorderRadius: 2px; --LeftGutter: 0px; --LineLeftOffset: 1px; --BottomGap: 12px; --BarsHoursGap: 8px; --ExtremeLabelGap: 10px; --GradientCurrent: linear-gradient(to top, #FF8000, #FF0000); }
+        :root { --BorderRadius: 2px; --LeftGutter: 0px; --LineLeftOffset: 1px; --BottomGap: 12px; --BarsHoursGap: 8px; --ExtremeLabelGap: 10px; --GradientCurrent: linear-gradient(to top, #FF8000, #FF0000); --HoursH: 20px; --PricesH: 20px; --HoursPad: 0.25em; }
         body {
             overflow: hidden; /* verhindert Scrollbalken innerhalb der Kachel */
             color: var(--content-color, var(--font-color));
@@ -19,7 +19,7 @@
         #bars {
             display: flex;
             align-items: flex-end;
-            height: calc(100% - 40px - var(--BottomGap) - var(--BarsHoursGap)); /* ziehe zusätzlich Abstand zwischen Balken und Stunden ab */
+            height: calc(100% - var(--PricesH) - var(--HoursH) - var(--BottomGap) - var(--BarsHoursGap)); /* dynamisch: Preise + Stunden abziehen */
             position: relative;
             overflow: hidden; /* verhindert, dass Baseline/Fill den Container nach unten erweitern */
         }
@@ -31,7 +31,7 @@
         }
 
         #prices {
-            height: 20px;
+            height: var(--PricesH);
             margin-left: 5px;
             margin-top: var(--BottomGap);
             font-size: var(--FontSizePrices);
@@ -78,7 +78,8 @@
             left: 0;
             width: 100%;
             height: 0px;
-            border-top: 1px dashed rgba(255,255,255,0.4);
+            border-top: 1px dashed var(--content-color);
+            opacity: 0.25; /* 50% transparent */
             z-index: 1;
         }
 
@@ -97,9 +98,10 @@
             display: flex;
             margin-bottom: 0;
             margin-top: var(--BarsHoursGap);
-            height: 20px; /* fixe Höhe, passt zur Berechnung von #bars/#avgoverlay */
+            height: var(--HoursH); /* dynamische Höhe gemäß Text */
             text-align: var(--TextAlignHours);
             font-size: var(--FontSizeHours);
+
         }
 
         #hours > div {
@@ -107,19 +109,43 @@
             margin-left: 1px;
             margin-right: 1px;
             writing-mode: var(--WriteMode);
+            position: relative; /* für Overlay-Hintergrund */
+            border-radius: 3px; /* optische Abrundung bleibt erhalten */
+            box-sizing: border-box; /* Padding in Größe einbeziehen */
+            z-index: 0; /* Stacking-Kontext für Overlay hinter dem Text */
+            display: flex;              /* Text in der Box zentrieren */
+            align-items: center;        /* vertikal zentriert */
+            justify-content: center;    /* horizontal zentriert */
+            /* Vertikales Padding in jeder Stundenbox, skaliert mit Schriftgröße */
+            padding-top: var(--HoursPad, 0.5em);
+            padding-bottom: var(--HoursPad, 0.5em);
         }
 
-        #hours > div.current {
+        /* Transparenter Hintergrund nur per Overlay, Text bleibt voll sichtbar */
+        #hours > div::before {
+            content: "";
+            position: absolute;
+            inset: 0;
             background-color: var(--BGCHour);
+            opacity: 0.2; /* alle außer der ersten Stunde: 80% transparent */
             border-radius: 3px;
+            pointer-events: none; /* keine Interaktion blockieren */
+            z-index: -1; /* hinter dem Text platzieren */
         }
+
+        /* Erste Stunde mit vollem Hintergrund */
+        #hours > div.current::before {
+            opacity: 1;
+        }
+
+        
         /* Overlay für Stunden-Durchschnittswerte */
         #avgoverlay {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
-            height: calc(100% - 40px - var(--BottomGap) - var(--BarsHoursGap)); /* gleiche Höhe wie #bars, inklusive Abstand zwischen Balken und Stunden */
+            height: calc(100% - var(--PricesH) - var(--HoursH) - var(--BottomGap) - var(--BarsHoursGap)); /* gleiche Höhe wie #bars, inklusive Abstand zwischen Balken und Stunden */
             pointer-events: none; /* Overlay nicht klick-blockierend */
             z-index: 2;
             overflow: hidden; /* Inhalt bleibt innerhalb, Labels werden geclamped */
@@ -140,15 +166,18 @@
             position: absolute;
             left: calc(var(--LeftGutter) + var(--LineLeftOffset));
             width: calc(100% - var(--LeftGutter) - var(--LineLeftOffset));
-            border-top: 1px dashed rgba(255,255,255,0.25);
+            border-top: 1px dashed var(--content-color);
+            opacity: 0.25; /* 75% transparent */
         }
         #avgoverlay .gridline.gridline-max {
-            border-top: 1px solid rgba(255,255,255,0.6);
+            border-top: 1px solid var(--content-color);
+            opacity: 0.25; /* 75% transparent */
             left: 0;                /* min/max bis zum linken Rand */
             width: 100%;            /* volle Breite */
         }
         #avgoverlay .gridline.gridline-zero {
-            border-top: 1px dashed rgba(255,255,255,0.4);
+            border-top: 1px dashed var(--content-color);
+            opacity: 0.25; /* 50% transparent */
         }
         #avgoverlay .gridprice {
             position: absolute;
@@ -158,8 +187,8 @@
             text-align: right;
             transform: translateY(-50%);
             transform-origin: 100% 50%; /* skalieren um die vertikale Mitte neben der Linie */
-            color: var(--FCBars);
-            font-size: var(--FontSizeBars);
+            color: var(--content-color);
+            font-size: var(--FontSizeScale, var(--FontSizeBars));
             white-space: nowrap;
             writing-mode: horizontal-tb;
         }
@@ -333,9 +362,33 @@
                     break;
                     case 'FontSizeHours':
                        root.style.setProperty('--FontSizeHours', 'clamp('+data[parameter]+')');
+                       // derive --HoursPad as 25% of each clamp bound to avoid calc()*clamp() issues
+                       try {
+                           const parts = String(data[parameter]).split(',');
+                           const quarter = (s) => {
+                               const m = String(s).trim().match(/^(-?\d+(?:\.\d+)?)([a-z%]+)$/i);
+                               if (!m) return String(s).trim();
+                               const v = parseFloat(m[1]) * 0.25;
+                               const u = m[2];
+                               return v + u;
+                           };
+                           if (parts.length === 3) {
+                               const padClamp = 'clamp(' + quarter(parts[0]) + ', ' + quarter(parts[1]) + ', ' + quarter(parts[2]) + ')';
+                               root.style.setProperty('--HoursPad', padClamp);
+                           }
+                       } catch(e) { /* ignore */ }
+                       // re-measure hours row to update --HoursH (affects padding/top-bottom and layout)
+                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                     break;
                     case 'FontSizePrices':
                        root.style.setProperty('--FontSizePrices', 'clamp('+data[parameter]+')');
+                       // prices row height depends on its font size; re-measure and rebuild overlay
+                       window.requestAnimationFrame(() => { try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
+                    break;
+                    case 'FontSizeScale':
+                       // separate scale (grid price labels) font size
+                       root.style.setProperty('--FontSizeScale', 'clamp('+data[parameter]+')');
+                       window.requestAnimationFrame(rebuildOverlay);
                     break;
                     case 'FCBars':
                         root.style.setProperty('--FCBars', '#'+data[parameter]);
@@ -376,6 +429,8 @@
                                 root.style.setProperty('--WriteMode','vertical-lr');
                                 root.style.setProperty('--TextAlignHours','left');
                             }
+                        // writing mode changes intrinsic height; re-measure to update --HoursH and overlay
+                        window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                         break;
                     case 'NoData':
                             if(Object.keys(data[parameter]).length >=1 )
@@ -483,7 +538,7 @@
                        let CurrentHourIndex = 0;
                        let hoursToShow = HourAhead || Math.min(48, Math.ceil(dataset.length / BarsPerHour));
                        if (hoursToShow > 48) hoursToShow = 48;
-                       const expectedBars = Math.min(dataset.length, hoursToShow * BarsPerHour);
+                       const expectedBars = hoursToShow * BarsPerHour;
                        // Anzahl tatsächlich gefüllter Balken: bis zum letzten Balken mit einem von 0 verschiedenen numerischen Preis
                        let filledBarsUntil = 0;
                        for (let i = expectedBars - 1; i >= 0; i--) {
@@ -493,7 +548,7 @@
                        }
                        lastFilledBars = filledBarsUntil;
 
-                       // pro Stunde prüfen, ob mindestens ein Balken mit !=0 vorhanden ist
+                       // pro Stunde prüfen, ob mindestens ein gültiger Preis vorhanden ist
                        lastHourHasData = new Array(hoursToShow).fill(false);
                        for (let h = 0; h < hoursToShow; h++) {
                            for (let q = 0; q < BarsPerHour; q++) {
@@ -501,7 +556,9 @@
                                if (idx < dataset.length) {
                                    const r = dataset[idx];
                                    const p = (r && typeof r.price === 'number') ? r.price : NaN;
-                                   if (isFinite(p) && p !== 0) { lastHourHasData[h] = true; break; }
+                                   // In Stundenmodus (BarsPerHour===1) zählen 0.0 mit leerem Level NICHT als vorhandene Daten (Platzhalter)
+                                   const hasLevel = !!(r && typeof r.level === 'string' && r.level !== '');
+                                   if (isFinite(p) && (BarsPerHour > 1 || (p !== 0 && hasLevel))) { lastHourHasData[h] = true; break; }
                                }
                            }
                        }
@@ -569,7 +626,7 @@
                        let currentSeg = Math.floor(currentMinuteNow / segSize);
                        if (currentSeg >= BarsPerHour) currentSeg = BarsPerHour - 1;
                        for (let i = 0; i < expectedBars; i++) {
-                            const row = dataset[i] || { price: 0 };
+                            const row = dataset[i] || { price: NaN, nodata: true };
                             const hourIndex = Math.floor(i / BarsPerHour);
                             const groupAvg = (hourAverages[hourIndex] || 0);
 
@@ -590,13 +647,13 @@
                             // Standardmäßig keine aktuelle-Stunde-Markierung
                             try { barindex.classList.remove('current-hour'); } catch(e) { /* ignore */ }
                             const hourindex = document.getElementById('hour_' + hourIndex);
-                            // Stunde aus dem Datensatz bestimmen (falls vorhanden), ansonsten vom vorberechneten Label nehmen
-                            const hour = (row && row.start) ? (new Date(row.start*1000)).getHours() : ((displayStartHour + hourIndex) % 24);
+                            // Nur die erste sichtbare Stunde (linke) hervorheben
                             if (hourindex) {
-                                // Label wurde oben bereits gesetzt; hier nur ggf. Hervorhebung aktualisieren
-                                if (hour === currentHourNow) {
+                                if (hourIndex === 0) {
                                     hourindex.className = "current";
                                     hourindex.style.color = UseCurrentColorHour;
+                                } else {
+                                    hourindex.className = "";
                                 }
                             }
 
@@ -604,12 +661,24 @@
                                 const fill = barindex.firstElementChild || barindex.querySelector('.bar-inner');
                                 if (fill) {
                                     let heightPct = 0;
-                                    if (row.price === 0) {
-                                        // an der Nulllinie verankern
-                                        heightPct = 0;
-                                        fill.style.top = baselineTopPct + '%';
-                                        fill.style.bottom = '';
-                                        fill.style.opacity = '0.3';
+                                    // Kein Preis (grauer Balken), wenn: kein numerischer Wert, NaN, explizit nodata, Index > dataset
+                                    // oder Level leer (Backend liefert bei fehlenden Stunden ein leeres Level)
+                                    const noPrice = (typeof row.price !== 'number') || !isFinite(row.price) || (row && row.nodata === true) || (i >= dataset.length) ||
+                                                    (row && typeof row.level === 'string' && row.level === '');
+                                    if (noPrice) {
+                                        // Kein Preis: Platzhalter mit 70% Höhe, von unten ansteigend
+                                        heightPct = 70;
+                                        fill.style.top = '';
+                                        fill.style.bottom = '0';
+                                        fill.style.height = '70%';
+                                        fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
+                                        fill.style.borderTopRightRadius = 'var(--BorderRadius)';
+                                        fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
+                                        fill.style.borderBottomRightRadius = 'var(--BorderRadius)';
+                                        fill.style.opacity = '1';
+                                        // Verlauf: unten grau 70% transparent (0.3 Opazität) -> oben grau 100% transparent (0.0)
+                                        fill.style.backgroundImage = 'linear-gradient(to top, rgba(128,128,128,0.3), rgba(128,128,128,0))';
+                                        try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
                                     } else if (row.price > 0) {
                                         const posRange = (localMax > 0) ? localMax : 1;
                                         const posAvail = baselineTopPct; // verfügbarer Raum über der Baseline
@@ -621,6 +690,9 @@
                                         fill.style.borderBottomLeftRadius = '0px';
                                         fill.style.borderBottomRightRadius = '0px';
                                         fill.style.opacity = '1';
+                                        // Inline-Gradient entfernen, damit CSS (inkl. current-hour) greift
+                                        fill.style.backgroundImage = '';
+                                        try { barindex.removeAttribute('data-nodata'); } catch(e) { /* ignore */ }
                                     } else { // row.price < 0
                                         const negRange = (localMin < 0) ? Math.abs(localMin) : 1;
                                         const negAvail = 100 - baselineTopPct; // verfügbarer Raum unter der Baseline
@@ -632,6 +704,9 @@
                                         fill.style.borderTopLeftRadius = '0px';
                                         fill.style.borderTopRightRadius = '0px';
                                         fill.style.opacity = '1';
+                                        // Inline-Gradient entfernen, damit CSS (inkl. current-hour) greift
+                                        fill.style.backgroundImage = '';
+                                        try { barindex.removeAttribute('data-nodata'); } catch(e) { /* ignore */ }
                                     }
 
                                     fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
@@ -737,7 +812,8 @@
                        lastLocalMax = localMax;
                        lastTotalBars = Math.max(lastTotalBars, expectedBars);
                        lastTotalHours = Math.max(lastTotalHours, hoursToShow);
-                       window.requestAnimationFrame(rebuildOverlay);
+                       // Stundenhöhe nach Text messen und anwenden, danach Overlay neu zeichnen
+                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                            
                         break;
                         case 'reload':
@@ -822,6 +898,39 @@
             // ignore
         }
         
+        // Höhe der Stundenzeile am Text ausrichten und an CSS-Variable binden
+        function measureHoursHeight() {
+            try {
+                const hoursEl = document.getElementById('hours');
+                if (!hoursEl) return;
+                // Temporär auf auto setzen, damit Padding/Schriftgröße der Kinder die Höhe bestimmen
+                const prevInlineHeight = hoursEl.style.height;
+                hoursEl.style.height = 'auto';
+                // Reflow forcieren und dann messen
+                void hoursEl.offsetHeight;
+                let maxH = Math.ceil(hoursEl.getBoundingClientRect().height);
+                if (!isFinite(maxH) || maxH <= 0) { maxH = 20; }
+                document.documentElement.style.setProperty('--HoursH', maxH + 'px');
+                // Ursprüngliche Inline-Höhe zurücksetzen (leer lassen, damit CSS-Variable greift)
+                hoursEl.style.height = prevInlineHeight && prevInlineHeight !== 'auto' ? prevInlineHeight : '';
+            } catch (e) { /* ignore */ }
+        }
+
+        // Höhe der Preise-Zeile am Text ausrichten und an CSS-Variable binden
+        function measurePricesHeight() {
+            try {
+                const pricesEl = document.getElementById('prices');
+                if (!pricesEl) return;
+                const prevInlineHeight = pricesEl.style.height;
+                pricesEl.style.height = 'auto';
+                void pricesEl.offsetHeight;
+                let h = Math.ceil(pricesEl.getBoundingClientRect().height);
+                if (!isFinite(h) || h <= 0) { h = 20; }
+                document.documentElement.style.setProperty('--PricesH', h + 'px');
+                pricesEl.style.height = prevInlineHeight && prevInlineHeight !== 'auto' ? prevInlineHeight : '';
+            } catch (e) { /* ignore */ }
+        }
+
         // Overlay-Funktion außerhalb von handleMessage definieren
         function rebuildOverlay() {
             try {
@@ -871,25 +980,52 @@
                     measureBox.appendChild(sample);
                     maxLabelH = Math.max(maxLabelH, sample.offsetHeight || 0);
 
-                    let labelsToMeasure = [];
-                    const step = 5; // ct
+                    // Dynamischer Schritt: 5ct (Standard), bei zu dichter Beschriftung auf 10ct erhöhen
                     const eps = 1e-6;
-                    function pushUnique(price) {
-                        for (const it of labelsToMeasure) {
-                            if (Math.abs(it.price - price) < eps) return;
+                    function generateGridLabels(stepVal) {
+                        const arr = [];
+                        function pushUniqueLocal(price) {
+                            for (const it of arr) {
+                                if (Math.abs(it.price - price) < eps) return;
+                            }
+                            arr.push({ price, text: price.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
                         }
-                        labelsToMeasure.push({ price, text: price.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
+                        // Von der Nulllinie nach oben (ohne Nulllinie)
+                        for (let q = stepVal; q <= lastLocalMax + eps; q += stepVal) { pushUniqueLocal(q); }
+                        // Von der Nulllinie nach unten (ohne Nulllinie)
+                        for (let q = -stepVal; q >= lastLocalMin - eps; q -= stepVal) { pushUniqueLocal(q); }
+                        return arr; // Extremwerte hier bewusst NICHT enthalten
                     }
-                    // Von der Nulllinie nach oben (ohne Nulllinie)
-                    for (let q = step; q <= lastLocalMax + eps; q += step) { pushUnique(q); }
-                    // Von der Nulllinie nach unten (ohne Nulllinie)
-                    for (let q = -step; q >= lastLocalMin - eps; q -= step) { pushUnique(q); }
-                    // Max/Min explizit (durchgezogene Linie)
-                    pushUnique(lastLocalMax);
-                    // Min-Linie und -Preis nur anzeigen, wenn Minimum negativ ist
-                    if (lastLocalMin < 0) {
-                        pushUnique(lastLocalMin);
+                    function addExtremeLabels(list) {
+                        // Max immer, Min nur wenn negativ
+                        const exists = (p) => list.some(it => Math.abs(it.price - p) < eps);
+                        if (!exists(lastLocalMax)) list.push({ price: lastLocalMax, text: lastLocalMax.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
+                        if (lastLocalMin < 0 && !exists(lastLocalMin)) list.push({ price: lastLocalMin, text: lastLocalMin.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
+                        return list;
                     }
+                    function minSpacingPxFor(labels) {
+                        if (!labels || labels.length < 2) return Infinity;
+                        const sorted = labels.slice().sort((a,b) => a.price - b.price);
+                        let minPx = Infinity;
+                        for (let i = 1; i < sorted.length; i++) {
+                            const y1 = yForPrice(sorted[i-1].price);
+                            const y2 = yForPrice(sorted[i].price);
+                            const d = Math.abs(y2 - y1);
+                            if (d < minPx) minPx = d;
+                        }
+                        return minPx;
+                    }
+                    let step = 5; // ct (Standard)
+                    // Dichteprüfung ausschließlich auf regulären Rasterlabels (ohne Extremwerte)
+                    let gridOnly = generateGridLabels(step);
+                    // Umschalten erst, wenn sich die Labels nahezu berühren: (Labelhöhe + 1px)
+                    const spacingThreshold = Math.max(4, (maxLabelH || 0) + 1);
+                    if (minSpacingPxFor(gridOnly) < spacingThreshold) {
+                        step = 10;
+                        gridOnly = generateGridLabels(step);
+                    }
+                    // Für die tatsächliche Darstellung: Rasterlabels + Extremwerte kombinieren
+                    let labelsToMeasure = addExtremeLabels(gridOnly.slice());
 
                     // Labelbreite messen
                     let maxLabelW = 0;
@@ -944,6 +1080,7 @@
                         const lbl = document.createElement('div');
                         lbl.className = 'gridprice';
                         lbl.style.top = y + 'px';
+                        lbl.style.textAlign = 'right'; // ensure right alignment even on first render
                         lbl.textContent = item.text;
                         overlay.appendChild(lbl);
                         // Label vertikal zentrieren: Höhe messen und Position anpassen
@@ -999,6 +1136,7 @@
                         zeroLbl.className = 'gridprice';
                         zeroLbl.textContent = (0).toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '');
                         zeroLbl.style.top = y0 + 'px';
+                        zeroLbl.style.textAlign = 'right'; // ensure right alignment on first render
                         overlay.appendChild(zeroLbl);
                         // zentrieren und Rand-Clamping
                         const lh0 = zeroLbl.offsetHeight || 0;
@@ -1051,9 +1189,12 @@
                                 const idx = firstIdx + q;
                                 const barEl = document.getElementById('bar_' + idx);
                                 if (!barEl || barEl.style.display === 'none') continue;
+                                // Platzhalter-Balken (data-nodata='1') nicht als vorhandene Daten zählen
+                                const nd = barEl.getAttribute('data-nodata');
+                                if (nd === '1') { continue; }
                                 const attr = barEl.getAttribute('data-price');
                                 const parsed = parseFloat(attr);
-                                if (attr !== null && isFinite(parsed) && parsed !== 0) { hourHasDomData = true; break; }
+                                if (attr !== null && isFinite(parsed)) { hourHasDomData = true; break; }
                             }
                         } catch(e) { /* ignore */ }
                         const hasData = hourHasDomData || lastHourHasData[h];
@@ -1067,8 +1208,8 @@
                 // ignore
             }
         }
-        // Bei Größenänderung neu positionieren
-        window.addEventListener('resize', () => window.requestAnimationFrame(rebuildOverlay));
+        // Bei Größenänderung neu messen und neu positionieren
+        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} }));
     </script>
 </body>
 </html>

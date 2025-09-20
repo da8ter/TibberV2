@@ -8,7 +8,7 @@
         {   "type": "CheckBox",
             "name": "DemoMode",
             "caption": "Demo mode (simulate 15-minute data)",
-            "visible": false
+            "visible": true
         },
         {   "type": "CheckBox",
         "name": "InstanceActive",
@@ -251,7 +251,8 @@
                             {
                                 "type": "CheckBox",
                                 "name": "HTML_Show_Grid",
-                                "caption": "show gridlines and prices"
+                                "caption": "show gridlines and prices",
+                                "value": false
                             }
                         ]
                     }                                        
@@ -371,6 +372,45 @@
                     {   
                         "type": "NumberSpinner",
                         "name": "HTML_FontSizeMaxP",
+                        "caption": "set maximum fontsize in px",
+                        "digits": 0,
+                        "minimum": 16,
+                        "maximum": 30,
+                        "visible": true
+                    }
+                    ]
+                }
+
+                ,
+                { 
+                    "type": "Label", 
+                    "caption": "Fontsize price scale" 
+                },
+                { 
+                    "type": "RowLayout",
+                    "items": [
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMinS",
+                        "caption": "set minimum fontsize in px",
+                        "digits": 0,
+                        "minimum": 1,
+                        "maximum": 15,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeDefS",
+                        "width":"400px",
+                        "caption": "set default fontsize in vw. 1vw corresponds to 1% of the width of the viewport",
+                        "digits": 0,
+                        "minimum": 0,
+                        "maximum": 5,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMaxS",
                         "caption": "set maximum fontsize in px",
                         "digits": 0,
                         "minimum": 16,
