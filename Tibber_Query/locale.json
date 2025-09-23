@@ -81,6 +81,7 @@
             "thickness of the marker in px":"dicke der Markierung in px",
             "Reset HTML settings":"alle HTML Einstellungen zurücksetzen",
             "Set how many hours you want to see, Min. 12 and Max. 48":"Legen Sie fest, wieviele Stunden (minimal 12, maximal 48) sie sehen möchten.",
+            "Only show bars with price info":"Nur Balken mit Preis-Info anzeigen",
             "no data available, please check log file for error messages.":"keine Daten Verfügbar, bitte das Logfile auf Fehler prüfen.",
             "display of prices in the bar":"Anzeige der Preise im Balken",
             "Number of decimal places":"Anzahl der Nachkommastelle",

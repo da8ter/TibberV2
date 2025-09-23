@@ -254,6 +254,7 @@
         // Sichtbarkeiten (vom Backend konfigurierbar)
         let BarShowPrices = true; // Preise in den Balken
         let ShowGrid = true;      // Rasterlinien + Preislabels im Overlay
+        let OnlyPriceBars = false; // nur Balken mit Preis-Info anzeigen
         // Referenz auf :root für CSS-Variablen
         const root = document.documentElement;
         // Overlay-Cache für stabile Positionierung
@@ -269,8 +270,6 @@
         // Indizes der Balken mit globalem Min/Max für die aktuelle Ansicht
         let lastIndexMinBar = -1;
         let lastIndexMaxBar = -1;
-        // Anzahl der tatsächlich gefüllten Balken im letzten Render-Durchlauf
-        let lastFilledBars = 0;
         // Pro Stunde: gibt es valide (!=0) Daten in dieser Stunde?
         let lastHourHasData = [];
 
@@ -364,6 +363,29 @@
                     case 'show_grid':
                         ShowGrid = !!data[parameter];
                         // Overlay neu berechnen
+                        window.requestAnimationFrame(rebuildOverlay);
+                    break;
+                    case 'only_price_bars':
+                        OnlyPriceBars = !!data[parameter];
+                        // Sichtbarkeit bereits gerenderter Balken umschalten
+                        try {
+                            for (let i = 0; i < lastTotalBars; i++) {
+                                const el = document.getElementById('bar_' + i);
+                                if (!el) continue;
+                                const nd = el.getAttribute('data-nodata');
+                                const attr = el.getAttribute('data-price');
+                                const val = parseFloat(attr);
+                                const hasPrice = isFinite(val) && nd !== '1';
+                                el.style.display = (OnlyPriceBars && !hasPrice) ? 'none' : '';
+                            }
+                            // Stunden ein-/ausblenden anhand vorhandener Daten
+                            for (let h = 0; h < lastHoursToShow; h++) {
+                                const hourEl = document.getElementById('hour_' + h);
+                                if (!hourEl) continue;
+                                const hasData = !!lastHourHasData[h];
+                                hourEl.style.display = (OnlyPriceBars && !hasData) ? 'none' : '';
+                            }
+                        } catch(e) { /* ignore */ }
                         window.requestAnimationFrame(rebuildOverlay);
                     break;
                     case 'FontSizeBars':
@@ -540,9 +562,9 @@
                        const f = Math.max(0, Math.min(1, scVal * 0.1));
                        let viewMin;
                        if (localMin >= 0 && localMax > 0) {
-                           // Positive-only: Scale=0 deaktiviert Cropping -> beginne bei localMin
+                           // Positive-only: Scale=0 deaktiviert Cropping -> beginne bei 0 (kein Wegschneiden)
                            if (scVal <= 0) {
-                               viewMin = localMin;
+                               viewMin = 0;
                            } else {
                                // Sichtbereich beginnt bei Anteil von 0..localMin
                                viewMin = Math.min(localMax - eps, f * localMin);
@@ -596,11 +618,6 @@
                            : 24;
                        if (hoursToShow > 48) hoursToShow = 48;
                        const expectedBars = hoursToShow * BarsPerHour;
-                       // Flex-Basis pro Stunde und pro Balken berechnen:
-                       // Stunden: (100% - 2px * hoursToShow) / hoursToShow
-                       // Balken:  ((Stundenbreite - 2px) / BarsPerHour)
-                       const hourBasisCss = `calc((100% - (${hoursToShow*2}px)) / ${hoursToShow})`;
-                       const barBasisCss  = `calc((${hourBasisCss} - 2px) / ${Math.max(1, BarsPerHour)})`;
                        // Prozent-Mapping über die gesamte sichtbare Range
                        const fullRange = (viewMax - viewMin) || 1;
                        function yPctFor(val) {
@@ -609,16 +626,7 @@
                            t = Math.max(0, Math.min(1, t));
                            return 100 * (1 - t); // 0% = oben, 100% = unten
                        }
-                       // Anzahl tatsächlich gefüllter Balken: bis zum letzten Balken mit Daten (Level vorhanden)
-                       let filledBarsUntil = 0;
-                       for (let i = expectedBars - 1; i >= 0; i--) {
-                           const r = dataset[i];
-                           const p = (r && typeof r.price === 'number') ? r.price : NaN;
-                           const hasLevel = !!(r && typeof r.level === 'string' && r.level !== '');
-                           const nd = !!(r && r.nodata === true);
-                           if (hasLevel && !nd && isFinite(p)) { filledBarsUntil = i + 1; break; }
-                       }
-                       lastFilledBars = filledBarsUntil;
+                       
 
                        // pro Stunde prüfen, ob mindestens ein gültiger Preis vorhanden ist
                        lastHourHasData = new Array(hoursToShow).fill(false);
@@ -636,11 +644,38 @@
                            }
                        }
 
-                       // Layout dynamisch anpassen: Barbreite = Stundenbreite / BarsPerHour
+                       // Precompute erste/letzte sichtbare Balken pro Stunde für saubere Ränder
+                       let visibleHoursCount = hoursToShow;
+                       let firstVisIdxPerHour = new Array(hoursToShow).fill(-1);
+                       let lastVisIdxPerHour  = new Array(hoursToShow).fill(-1);
+                       if (OnlyPriceBars) {
+                           visibleHoursCount = lastHourHasData.reduce((a,b)=>a + (b?1:0), 0);
+                           if (!isFinite(visibleHoursCount) || visibleHoursCount <= 0) visibleHoursCount = hoursToShow;
+                           for (let h = 0; h < hoursToShow; h++) {
+                               if (!lastHourHasData[h]) continue;
+                               for (let q = 0; q < BarsPerHour; q++) {
+                                   const idx = h * BarsPerHour + q;
+                                   if (idx < dataset.length) {
+                                       const r = dataset[idx];
+                                       const p = (r && typeof r.price === 'number') ? r.price : NaN;
+                                       const nd = !!(r && r.nodata === true);
+                                       const hasLevel = !!(r && typeof r.level === 'string' && r.level !== '');
+                                       const noPrice = !isFinite(p) || nd || (p === 0 && !hasLevel);
+                                       if (!noPrice) {
+                                           if (firstVisIdxPerHour[h] === -1) firstVisIdxPerHour[h] = idx;
+                                           lastVisIdxPerHour[h] = idx;
+                                       }
+                                   }
+                               }
+                           }
+                       }
+
+                       // Layout dynamisch anpassen: Stundenbreite (volle Breite auf sichtbare Stunden), Balkenbreite per CSS-Var bzw. inline
                        try {
-                           const hoursN = Math.max(1, hoursToShow);
+                           const hoursN = Math.max(1, OnlyPriceBars ? (visibleHoursCount || hoursToShow) : hoursToShow);
                            const BPH    = Math.max(1, BarsPerHour || 1);
                            root.style.setProperty('--HourAhead',  '0 0 calc((100% - ('+(hoursN*2)+'px)) / '+hoursN+')');
+                           // Bei aktivem Filter setzen wir pro Balken inline die Flex-Breite, daher bleibt --CountBars als Fallback bestehen
                            root.style.setProperty('--CountBars', '0 0 calc(((100% - ('+(hoursN*2)+'px)) / '+hoursN+') / '+BPH+')');
                        } catch(e) { /* ignore */ }
 
@@ -656,6 +691,14 @@
                            }
                            hEl.style.display = '';
                            // Breite je Stunden-Label wird über CSS-Variable --HourAhead gesetzt
+                       }
+                       // Bei aktivem Filter Stunden ohne Preisinfo ausblenden
+                       if (OnlyPriceBars) {
+                           for (let h = 0; h < hoursToShow; h++) {
+                               const hEl = document.getElementById('hour_' + h);
+                               if (!hEl) continue;
+                               hEl.style.display = lastHourHasData[h] ? '' : 'none';
+                           }
                        }
                        // Nach dem Setzen aller Stunden-Labels: Schrift anpassen
                        try { window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} }); } catch(e) { /* ignore */ }
@@ -753,18 +796,24 @@
                                 if (fill) {
                                     let heightPct = 0;
                                     if (noPrice) {
-                                        // Platzhalter: grauer Balken 70% hoch von unten
-                                        heightPct = 70;
-                                        fill.style.top = '';
-                                        fill.style.bottom = '0';
-                                        fill.style.height = '70%';
-                                        fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
-                                        fill.style.borderTopRightRadius = 'var(--BorderRadius)';
-                                        fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
-                                        fill.style.borderBottomRightRadius = 'var(--BorderRadius)';
-                                        fill.style.opacity = '1';
-                                        fill.style.backgroundImage = 'linear-gradient(to top, rgba(128,128,128,0.3), rgba(128,128,128,0))';
-                                        try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
+                                        if (OnlyPriceBars) {
+                                            // vollständig ausblenden, wenn keine Preisinfo vorhanden
+                                            barindex.style.display = 'none';
+                                            try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
+                                        } else {
+                                            // Platzhalter: grauer Balken 70% hoch von unten
+                                            heightPct = 70;
+                                            fill.style.top = '';
+                                            fill.style.bottom = '0';
+                                            fill.style.height = '70%';
+                                            fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
+                                            fill.style.borderTopRightRadius = 'var(--BorderRadius)';
+                                            fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
+                                            fill.style.borderBottomRightRadius = 'var(--BorderRadius)';
+                                            fill.style.opacity = '1';
+                                            fill.style.backgroundImage = 'linear-gradient(to top, rgba(128,128,128,0.3), rgba(128,128,128,0))';
+                                            try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
+                                        }
                                     } else if (viewMin >= 0) {
                                         // Positiv-only Range: von [viewMin..viewMax] auf [0..100] am Boden
                                         const denom = (viewMax - viewMin) || 1;
@@ -816,17 +865,30 @@
                                 try { barindex.setAttribute('data-price', isFinite(pVal) ? String(pVal) : ''); } catch(e) { /* ignore */ }
 
                                 // Keine Texte in 15-Minuten-Balken
-                                // Abstände: innerhalb der Stunde kein Abstand; zwischen Stunden kleiner Abstand
+                                // Abstände und Flex: bei aktivem Filter dynamisch pro Stunde, sonst Standard nach q
                                 const q = i % BarsPerHour; // 0..3
-                                if (q === 0) {
-                                    barindex.style.marginLeft = '1px';
-                                } else {
+                                if (OnlyPriceBars) {
+                                    // Nur Ränder an erstem/letztem sichtbaren Balken setzen, Breite über Standard lassen
                                     barindex.style.marginLeft = '0px';
-                                }
-                                if (q === BarsPerHour - 1) {
-                                    barindex.style.marginRight = '1px'; // Lücke zwischen Stunden
-                                } else {
                                     barindex.style.marginRight = '0px';
+                                    if (!noPrice) {
+                                        if (i === firstVisIdxPerHour[hourIndex]) barindex.style.marginLeft = '1px';
+                                        if (i === lastVisIdxPerHour[hourIndex])  barindex.style.marginRight = '1px';
+                                    }
+                                    barindex.style.flex = '';
+                                } else {
+                                    // Standardbreiten über CSS-Var --CountBars; fester Abstand am Stundenrand
+                                    if (q === 0) {
+                                        barindex.style.marginLeft = '1px';
+                                    } else {
+                                        barindex.style.marginLeft = '0px';
+                                    }
+                                    if (q === BarsPerHour - 1) {
+                                        barindex.style.marginRight = '1px';
+                                    } else {
+                                        barindex.style.marginRight = '0px';
+                                    }
+                                    barindex.style.flex = '';
                                 }
 
                                 // Exakt den aktuellen Balken hervorheben
@@ -1078,6 +1140,7 @@
             } catch (e) { /* ignore */ }
         }
 
+
         // Overlay-Funktion außerhalb von handleMessage definieren
         function rebuildOverlay() {
             try {
@@ -1315,13 +1378,24 @@
                 }
                 if (BarShowPrices) {
                     for (let h = 0; h < lastHoursToShow; h++) {
+                        const hourEl = document.getElementById('hour_' + h);
+                        if (hourEl && hourEl.style.display === 'none') { continue; }
                         const firstIdx = h * lastBarsPerHour;
                         const lastIdx  = firstIdx + (lastBarsPerHour - 1);
-                        const firstEl = document.getElementById('bar_' + firstIdx);
-                        const lastEl  = document.getElementById('bar_' + lastIdx);
-                        if (!firstEl || !lastEl) continue;
-                        const r1 = firstEl.getBoundingClientRect();
-                        const r2 = lastEl.getBoundingClientRect();
+                        // Bei eingeschaltetem Filter nur sichtbare Balken zur Zentrierung heranziehen
+                        let firstVisible = null;
+                        let lastVisible = null;
+                        for (let q = 0; q < lastBarsPerHour; q++) {
+                            const idx = firstIdx + q;
+                            const el = document.getElementById('bar_' + idx);
+                            if (el && el.style.display !== 'none') {
+                                if (!firstVisible) firstVisible = el;
+                                lastVisible = el;
+                            }
+                        }
+                        if (!firstVisible || !lastVisible) { continue; }
+                        const r1 = firstVisible.getBoundingClientRect();
+                        const r2 = lastVisible.getBoundingClientRect();
                         const centerX = (r1.left + r2.right) / 2;
                         const label = document.createElement('div');
                         label.className = 'avglabel';

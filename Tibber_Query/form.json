@@ -115,6 +115,11 @@
                         "minimum": 12,
                         "maximum": 48
                     },
+                    {   "type": "CheckBox",
+                        "name": "HTML_OnlyPriceBars",
+                        "caption": "Only show bars with price info",
+                        "visible": true
+                    },
                     {   "type": "NumberSpinner",
                         "name": "HTML_Scale",
                         "caption": "Cropping scale: 0 disables, 1-10 = 10%-100% of [0..min]",

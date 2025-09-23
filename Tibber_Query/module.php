@@ -101,6 +101,8 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyBoolean("HTML_Bar_Price_vis_ct", self::HTML_Bar_Price_vis_ct);
 			$this->RegisterPropertyBoolean("HTML_Bar_Show_Prices", true);
 			$this->RegisterPropertyBoolean("HTML_Show_Grid", false);
+			// Only render bars that have real price info (no placeholders)
+			$this->RegisterPropertyBoolean("HTML_OnlyPriceBars", false);
 			
 			$this->RegisterPropertyBoolean("HTML_Hour_WriteMode", self::HTML_Hour_WriteMode);
 
@@ -1399,12 +1401,23 @@ require_once __DIR__ . '/../libs/functions.php';
 			$result['BGCPriceE']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceE"));
 			$result['BGCPriceVE']					= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorPriceVE"));
 			$result['PriceLevelThickness']			= $this->ReadPropertyInteger("HTML_PriceLevelThick");
-			$result['HourAhead']					= min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
+			            // HourAhead: cap to module max; if at max AND OnlyPriceBars is enabled, further cap to available forecast hours
+            $hourAhead = min($this->ReadPropertyInteger("HTML_Default_HourAhead"), self::HTML_Max_HourAhead);
+            if ($hourAhead === self::HTML_Max_HourAhead && $this->ReadPropertyBoolean('HTML_OnlyPriceBars')) {
+                $raw = json_decode($this->ReadAttributeString('Ahead_Price_Data'), true);
+                $countOfAheadPriceData = is_array($raw) ? count($raw) : 0;
+                $numberOfForcastHours = $this->ReadPropertyBoolean("Enable_15m")
+                    ? intdiv($countOfAheadPriceData, 4)
+                    : $countOfAheadPriceData;
+                $hourAhead    = min($hourAhead, $numberOfForcastHours);
+            }
+			$result['HourAhead']                    = $hourAhead;
 
 			$result['bar_price_round']				= $this->ReadPropertyInteger("HTML_Bar_Price_Round");
 			$result['bar_price_vis_ct']				= $this->ReadPropertyBoolean("HTML_Bar_Price_vis_ct");
 			$result['bar_show_prices']              = $this->ReadPropertyBoolean("HTML_Bar_Show_Prices");
 			$result['show_grid']                    = $this->ReadPropertyBoolean("HTML_Show_Grid");
+			$result['only_price_bars']              = $this->ReadPropertyBoolean("HTML_OnlyPriceBars");
 
 			$result['hour_write_mode']				= $this->ReadPropertyBoolean("HTML_Hour_WriteMode");;
 
@@ -1485,6 +1498,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_Bar_Price_vis_ct'=> self::HTML_Bar_Price_vis_ct,
 				'HTML_Bar_Show_Prices'=> true,
 				'HTML_Show_Grid'=> true,
+				'HTML_OnlyPriceBars'=> false,
 				'HTML_Hour_WriteMode'=> self::HTML_Hour_WriteMode      
 
     ];
