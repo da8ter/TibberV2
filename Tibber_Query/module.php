@@ -81,7 +81,7 @@ require_once __DIR__ . '/../libs/functions.php';
 
 			$this->RegisterPropertyInteger("HTML_BGColorHour", self::HTML_Color_Grey);
 			$this->RegisterPropertyInteger("HTML_BorderRadius", self::HTML_Default_PX);
-			$this->RegisterPropertyInteger("HTML_Scale", self::HTML_Default_PX);
+			$this->RegisterPropertyInteger("HTML_Scale", 0);
 
 			$this->RegisterPropertyInteger("HTML_BGCstartG", self::HTML_Color_Mint);
 			$this->RegisterPropertyInteger("HTML_BGCstopG", self::HTML_Color_Darkmint);
@@ -847,11 +847,11 @@ require_once __DIR__ . '/../libs/functions.php';
                             $p = round($byStart[$st]['price'], 2);
                             $lvl = $byStart[$st]['level'];
                             $Ahead_Price_Data[] = [ 'start'=>$st, 'end'=>$en, 'price'=>$p, 'level'=>$lvl ];
-                            $AVGPrice[] = $p;
+                            $AVGPrice[] = $p; // nur echte Werte in die Durchschnittsliste aufnehmen
                         } else {
-                            // Kein Wert vorhanden -> Platzhalter 0 ct und leeres Level
+                            // Kein Wert vorhanden -> Platzhalter 0 ct und leeres Level (nicht in Durchschnitt einbeziehen)
                             $Ahead_Price_Data[] = [ 'start'=>$st, 'end'=>$en, 'price'=>0.0, 'level'=>''];
-                            $AVGPrice[] = 0.0;
+                            // $AVGPrice: fehlende Stunden überspringen
                         }
                     }
                 }
@@ -1263,6 +1263,8 @@ require_once __DIR__ . '/../libs/functions.php';
 				$ident = $row['Ident'];
 				$price = isset($row['Price']) ? floatval($row['Price']) : 0.0;
 				$level = $row['Level'] ?? '';
+				// Stunden ohne Daten (leerer Level) aus allen Berechnungen ausschließen
+				if ($level === '') { continue; }
 				$dayFlag = substr($ident, 7, 1); // '0' or '1'
 				if ($dayFlag === '0'){
 					$hasT0 = true;
@@ -1359,9 +1361,13 @@ require_once __DIR__ . '/../libs/functions.php';
                 $result['price_cur']    = $AVGPriceVal[0];
 			}
 			
-			$result['BGCHour'] 			= sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorHour"));
-			$result['BorderRadius']		= $this->ReadPropertyInteger("HTML_BorderRadius");
-			$result['Scale']			= $this->ReadPropertyInteger("HTML_Scale");
+			            $result['BGCHour'] 			= sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorHour"));
+            $result['BorderRadius']		= $this->ReadPropertyInteger("HTML_BorderRadius");
+            // Pass HTML_Scale (percentage semantics): 0 disables; 1..10 = 10%-100% cropping of [0..min]
+            $scaleVal = (int)$this->ReadPropertyInteger("HTML_Scale");
+            if ($scaleVal < 0) { $scaleVal = 0; }
+            if ($scaleVal > 10) { $scaleVal = 10; }
+            $result['Scale']			= $scaleVal;
 			$result['Gradient']			= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG"));
 			$result['GradientCurrent']	= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG_Current")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG_Current"));
 			$result['MarkPriceLevel']	= $this->ReadPropertyBoolean("HTML_MarkPriceLevel");
@@ -1462,7 +1468,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_FontColorHourDefault'=> self::HTML_Color_Black,
 				'HTML_BGColorHour'=> self::HTML_Color_Grey,
 				'HTML_BorderRadius'=> self::HTML_Default_PX,
-		'HTML_Scale'=> self::HTML_Default_PX,
+		'HTML_Scale'=> 0,
 		'HTML_BGCstartG'=> self::HTML_Color_Mint,
 		'HTML_BGCstopG'=> self::HTML_Color_Darkmint,
 		'HTML_BGCstartG_Current'=> self::HTML_Color_Orange,

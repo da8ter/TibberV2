@@ -254,6 +254,8 @@
         // Sichtbarkeiten (vom Backend konfigurierbar)
         let BarShowPrices = true; // Preise in den Balken
         let ShowGrid = true;      // Rasterlinien + Preislabels im Overlay
+        // Referenz auf :root für CSS-Variablen
+        const root = document.documentElement;
         // Overlay-Cache für stabile Positionierung
         let lastHoursToShow = 0;
         let lastHourAverages = [];
@@ -318,6 +320,13 @@
                 VisCent = ShowCtSuffix ? ' ct\u00A0\u00A0' : '\u00A0\u00A0';
             }
 
+            // Pre-process Scale so dataset rendering uses the current value even if order differs
+            if (Object.prototype.hasOwnProperty.call(data, 'Scale')) {
+                const sc = Number(data['Scale']);
+                Scale = (isFinite(sc) && sc >= 0) ? sc : 0;
+                try { console.debug('[Tibber] Scale received:', Scale); } catch(e) {}
+            }
+
             for (const parameter in data) {
             
             const element = document.getElementById(parameter);
@@ -377,8 +386,8 @@
                                root.style.setProperty('--HoursPad', padClamp);
                            }
                        } catch(e) { /* ignore */ }
-                       // re-measure hours row to update --HoursH (affects padding/top-bottom and layout)
-                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
+                       // re-measure and auto-fit hours row
+                       window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                     break;
                     case 'FontSizePrices':
                        root.style.setProperty('--FontSizePrices', 'clamp('+data[parameter]+')');
@@ -429,8 +438,8 @@
                                 root.style.setProperty('--WriteMode','vertical-lr');
                                 root.style.setProperty('--TextAlignHours','left');
                             }
-                        // writing mode changes intrinsic height; re-measure to update --HoursH and overlay
-                        window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
+                        // writing mode changes intrinsic height; auto-fit and re-measure to update --HoursH and overlay
+                        window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                         break;
                     case 'NoData':
                             if(Object.keys(data[parameter]).length >=1 )
@@ -471,8 +480,15 @@
                     break;
                     case 'HourAhead':
                         HourAhead = data[parameter];
-                        root.style.setProperty('--HourAhead', '0 0 calc((98% - (24px * 2)) / '+HourAhead+')');
-                        root.style.setProperty('--CountBars', '0 0 calc((98% - (24px * 2)) / '+(HourAhead * BarsPerHour)+')');
+                        try {
+                            const hoursN = Math.max(1, parseInt(HourAhead, 10) || 1);
+                            const BPH    = Math.max(1, parseInt(BarsPerHour, 10) || 1);
+                            // Per-Hour flex basis (labels): (100% - 2px*hours) / hours
+                            root.style.setProperty('--HourAhead',  '0 0 calc((100% - ('+(hoursN*2)+'px)) / '+hoursN+')');
+                            // Per-Bar flex basis: (Stundenbreite - 2px Margins) / BarsPerHour
+                            root.style.setProperty('--CountBars', '0 0 calc((((100% - ('+(hoursN*2)+'px)) / '+hoursN+') - 2px) / '+BPH+')');
+                        } catch(e) { /* ignore */ }
+                        window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                     break; 
                                         
                     case 'Ahead_Price_Data':
@@ -502,26 +518,59 @@
                            }
                            BarsPerHour = detected;
                        } catch(e) { /* ignore */ }
-                       // min/max für relative Höhe ermitteln
-                       let localMin = Number.MAX_VALUE;
-                       let localMax = Number.MIN_VALUE;
+                       // min/max für relative Höhe ermitteln (Balken ohne echte Preisdaten ignorieren)
+                       let localMin = Number.POSITIVE_INFINITY;
+                       let localMax = Number.NEGATIVE_INFINITY;
                        for (let row of dataset) {
-                           const p = (row && typeof row.price === 'number') ? row.price : 0;
+                           const p = (row && typeof row.price === 'number') ? row.price : NaN;
+                           const nd = !!(row && row.nodata === true);
+                           const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
+                           // Nur tatsächliche Preisdaten: numerisch, nicht nodata und keine Platzhalter-Null (0 + leeres Level)
+                           if (!isFinite(p) || nd || (p === 0 && !hasLevel)) continue;
                            if (p < localMin) localMin = p;
                            if (p > localMax) localMax = p;
                        }
+                       if (!isFinite(localMin) || !isFinite(localMax)) { localMin = 0; localMax = 0.0001; }
                        if (localMax === localMin) { localMax = localMin + 0.0001; }
 
-                       // Baseline (Nulllinie) berechnen: Position von oben in Prozent
+                       // Neue Semantik: HTML_Scale = n => n*10% Cropping des Bereichs [0 ct .. localMin]
+                       // f in [0..1]
+                       const eps = 0.0001;
+                       const scVal = Number(Scale) || 0;
+                       const f = Math.max(0, Math.min(1, scVal * 0.1));
+                       let viewMin;
+                       if (localMin >= 0 && localMax > 0) {
+                           // Positive-only: Scale=0 deaktiviert Cropping -> beginne bei localMin
+                           if (scVal <= 0) {
+                               viewMin = localMin;
+                           } else {
+                               // Sichtbereich beginnt bei Anteil von 0..localMin
+                               viewMin = Math.min(localMax - eps, f * localMin);
+                           }
+                       } else {
+                           // Negative oder gemischte Preise: Cropping deaktiviert
+                           viewMin = localMin;
+                       }
+                       let viewMax = localMax;           // sichtbarer Höchstpreis
+                       if (!isFinite(viewMin)) viewMin = localMin;
+                       if (!isFinite(viewMax)) viewMax = localMax;
+                       // Sicherstellen, dass die Range > 0 bleibt
+                       if (viewMin >= viewMax) {
+                           viewMin = viewMax - eps;
+                       }
+
+                       // Baseline (Nulllinie) berechnen: Position von oben in Prozent auf Basis des sichtbaren Fensters
                        let baselineTopPct = 100; // Standard: alles positiv -> Nulllinie unten
-                       if (localMin < 0 && localMax > 0) {
-                           baselineTopPct = (localMax / (localMax - localMin)) * 100;
-                       } else if (localMax <= 0) {
+                       if (viewMin < 0 && viewMax > 0) {
+                           baselineTopPct = (viewMax / (viewMax - viewMin)) * 100;
+                       } else if (viewMax <= 0) {
                            baselineTopPct = 0; // alles negativ -> Nulllinie oben
                        } else {
                            baselineTopPct = 100; // alles positiv -> Nulllinie unten
                        }
                        const baselineBottomPct = 100 - baselineTopPct;
+
+                       try { console.debug('[Tibber] viewMin/viewMax:', viewMin, viewMax, 'baselineTopPct:', baselineTopPct, 'cropPercent:', f, 'cropDisabledDueToNegative:', (localMin < 0), 'cropDisabledDueToScaleZero:', (scVal <= 0)); } catch(e) {}
 
                        // Baseline zeichnen/aktualisieren
                        let baseline = document.getElementById('baseline');
@@ -535,16 +584,39 @@
                        // Baseline im Raster nicht anzeigen
                        baseline.style.display = 'none';
 
+                       // Für Balkenberechnung: Baseline streng auf [0..100] klemmen
+                       const baseTopLocal = Math.max(0, Math.min(100, baselineTopPct));
+                       const baseBottomLocal = 100 - baseTopLocal;
+
                        let CurrentHourIndex = 0;
-                       let hoursToShow = HourAhead || Math.min(48, Math.ceil(dataset.length / BarsPerHour));
+                       // Sicherstellen, dass 24 Stunden angezeigt werden, falls HourAhead
+                       // noch nicht gesetzt wurde
+                       let hoursToShow = (typeof HourAhead === 'number' && HourAhead > 0)
+                           ? HourAhead
+                           : 24;
                        if (hoursToShow > 48) hoursToShow = 48;
                        const expectedBars = hoursToShow * BarsPerHour;
-                       // Anzahl tatsächlich gefüllter Balken: bis zum letzten Balken mit einem von 0 verschiedenen numerischen Preis
+                       // Flex-Basis pro Stunde und pro Balken berechnen:
+                       // Stunden: (100% - 2px * hoursToShow) / hoursToShow
+                       // Balken:  ((Stundenbreite - 2px) / BarsPerHour)
+                       const hourBasisCss = `calc((100% - (${hoursToShow*2}px)) / ${hoursToShow})`;
+                       const barBasisCss  = `calc((${hourBasisCss} - 2px) / ${Math.max(1, BarsPerHour)})`;
+                       // Prozent-Mapping über die gesamte sichtbare Range
+                       const fullRange = (viewMax - viewMin) || 1;
+                       function yPctFor(val) {
+                           let t = (val - viewMin) / fullRange; // 0..1
+                           if (!isFinite(t)) t = 0;
+                           t = Math.max(0, Math.min(1, t));
+                           return 100 * (1 - t); // 0% = oben, 100% = unten
+                       }
+                       // Anzahl tatsächlich gefüllter Balken: bis zum letzten Balken mit Daten (Level vorhanden)
                        let filledBarsUntil = 0;
                        for (let i = expectedBars - 1; i >= 0; i--) {
                            const r = dataset[i];
                            const p = (r && typeof r.price === 'number') ? r.price : NaN;
-                           if (isFinite(p) && p !== 0) { filledBarsUntil = i + 1; break; }
+                           const hasLevel = !!(r && typeof r.level === 'string' && r.level !== '');
+                           const nd = !!(r && r.nodata === true);
+                           if (hasLevel && !nd && isFinite(p)) { filledBarsUntil = i + 1; break; }
                        }
                        lastFilledBars = filledBarsUntil;
 
@@ -556,16 +628,21 @@
                                if (idx < dataset.length) {
                                    const r = dataset[idx];
                                    const p = (r && typeof r.price === 'number') ? r.price : NaN;
-                                   // In Stundenmodus (BarsPerHour===1) zählen 0.0 mit leerem Level NICHT als vorhandene Daten (Platzhalter)
+                                   const nd = !!(r && r.nodata === true);
                                    const hasLevel = !!(r && typeof r.level === 'string' && r.level !== '');
-                                   if (isFinite(p) && (BarsPerHour > 1 || (p !== 0 && hasLevel))) { lastHourHasData[h] = true; break; }
+                                   // Echte Daten: numerisch, nicht nodata, keine Platzhalter-Null
+                                   if (isFinite(p) && !nd && !(p === 0 && !hasLevel)) { lastHourHasData[h] = true; break; }
                                }
                            }
                        }
 
-                       // Layout dynamisch anpassen (CountBars abhängig von BarsPerHour)
-                       root.style.setProperty('--HourAhead', '0 0 calc((98% - (24px * 2)) / '+hoursToShow+')');
-                       root.style.setProperty('--CountBars', '0 0 calc((98% - (24px * 2)) / '+(hoursToShow * BarsPerHour)+')');
+                       // Layout dynamisch anpassen: Barbreite = Stundenbreite / BarsPerHour
+                       try {
+                           const hoursN = Math.max(1, hoursToShow);
+                           const BPH    = Math.max(1, BarsPerHour || 1);
+                           root.style.setProperty('--HourAhead',  '0 0 calc((100% - ('+(hoursN*2)+'px)) / '+hoursN+')');
+                           root.style.setProperty('--CountBars', '0 0 calc(((100% - ('+(hoursN*2)+'px)) / '+hoursN+') / '+BPH+')');
+                       } catch(e) { /* ignore */ }
 
                        // Sicherstellen, dass genügend Stunden-Labels existieren
                        const hoursContainer = document.getElementById('hours');
@@ -578,7 +655,10 @@
                                hoursContainer.appendChild(hEl);
                            }
                            hEl.style.display = '';
+                           // Breite je Stunden-Label wird über CSS-Variable --HourAhead gesetzt
                        }
+                       // Nach dem Setzen aller Stunden-Labels: Schrift anpassen
+                       try { window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} }); } catch(e) { /* ignore */ }
                        // Nicht benötigte alte Labels ausblenden
                        for (let h = hoursToShow; h < 96; h++) {
                            const extra = document.getElementById('hour_' + h);
@@ -601,14 +681,18 @@
                            }
                        }
 
-                       // Stundenmittel vorberechnen
+                       // Stundenmittel vorberechnen (nur Balken mit Daten berücksichtigen)
                        const hourAverages = [];
                        for (let h = 0; h < hoursToShow; h++) {
                            let sum = 0, count = 0;
                            for (let q = 0; q < BarsPerHour; q++) {
                                const idx = h * BarsPerHour + q;
-                               if (idx < dataset.length && dataset[idx] && typeof dataset[idx].price === 'number') {
-                                   sum += dataset[idx].price; count++;
+                               if (idx < dataset.length) {
+                                   const r = dataset[idx];
+                                   if (r && typeof r.price === 'number' && !(r.nodata === true)) {
+                                       const hasLevel = !!(typeof r.level === 'string' && r.level !== '');
+                                       if (!(r.price === 0 && !hasLevel)) { sum += r.price; count++; }
+                                   }
                                }
                            }
                            hourAverages[h] = count > 0 ? (sum / count) : 0;
@@ -644,6 +728,7 @@
                             } else {
                                 barindex.style.display = '';
                             }
+                            // Breite je Balken wird über CSS-Variable --CountBars gesetzt
                             // Standardmäßig keine aktuelle-Stunde-Markierung
                             try { barindex.classList.remove('current-hour'); } catch(e) { /* ignore */ }
                             const hourindex = document.getElementById('hour_' + hourIndex);
@@ -658,15 +743,17 @@
                             }
 
                             if (barindex) {
+                                // Preis-/NoData-Status einmalig berechnen und für alle folgenden Schritte nutzen
+                                const pNum = (typeof row.price === 'number') ? row.price : NaN;
+                                const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
+                                const baseNoData = !isFinite(pNum) || (row && row.nodata === true) || (i >= dataset.length);
+                                const noPrice = baseNoData || (pNum === 0 && !hasLevel);
+
                                 const fill = barindex.firstElementChild || barindex.querySelector('.bar-inner');
                                 if (fill) {
                                     let heightPct = 0;
-                                    // Kein Preis (grauer Balken), wenn: kein numerischer Wert, NaN, explizit nodata, Index > dataset
-                                    // oder Level leer (Backend liefert bei fehlenden Stunden ein leeres Level)
-                                    const noPrice = (typeof row.price !== 'number') || !isFinite(row.price) || (row && row.nodata === true) || (i >= dataset.length) ||
-                                                    (row && typeof row.level === 'string' && row.level === '');
                                     if (noPrice) {
-                                        // Kein Preis: Platzhalter mit 70% Höhe, von unten ansteigend
+                                        // Platzhalter: grauer Balken 70% hoch von unten
                                         heightPct = 70;
                                         fill.style.top = '';
                                         fill.style.bottom = '0';
@@ -676,48 +763,57 @@
                                         fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
                                         fill.style.borderBottomRightRadius = 'var(--BorderRadius)';
                                         fill.style.opacity = '1';
-                                        // Verlauf: unten grau 70% transparent (0.3 Opazität) -> oben grau 100% transparent (0.0)
                                         fill.style.backgroundImage = 'linear-gradient(to top, rgba(128,128,128,0.3), rgba(128,128,128,0))';
                                         try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
-                                    } else if (row.price > 0) {
-                                        const posRange = (localMax > 0) ? localMax : 1;
-                                        const posAvail = baselineTopPct; // verfügbarer Raum über der Baseline
-                                        heightPct = posAvail > 0 ? (row.price / posRange) * posAvail : 0;
+                                    } else if (viewMin >= 0) {
+                                        // Positiv-only Range: von [viewMin..viewMax] auf [0..100] am Boden
+                                        const denom = (viewMax - viewMin) || 1;
+                                        const frac = Math.max(0, Math.min(1, (pNum - viewMin) / denom));
+                                        heightPct = frac * 100;
                                         fill.style.top = '';
-                                        fill.style.bottom = baselineBottomPct + '%';
+                                        fill.style.bottom = '0';
+                                        fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
                                         fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
                                         fill.style.borderTopRightRadius = 'var(--BorderRadius)';
                                         fill.style.borderBottomLeftRadius = '0px';
                                         fill.style.borderBottomRightRadius = '0px';
                                         fill.style.opacity = '1';
-                                        // Inline-Gradient entfernen, damit CSS (inkl. current-hour) greift
                                         fill.style.backgroundImage = '';
                                         try { barindex.removeAttribute('data-nodata'); } catch(e) { /* ignore */ }
-                                    } else { // row.price < 0
-                                        const negRange = (localMin < 0) ? Math.abs(localMin) : 1;
-                                        const negAvail = 100 - baselineTopPct; // verfügbarer Raum unter der Baseline
-                                        heightPct = negAvail > 0 ? (Math.abs(row.price) / negRange) * negAvail : 0;
-                                        fill.style.top = baselineTopPct + '%';
-                                        fill.style.bottom = '';
-                                        fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
-                                        fill.style.borderBottomRightRadius = 'var(--BorderRadius)';
-                                        fill.style.borderTopLeftRadius = '0px';
-                                        fill.style.borderTopRightRadius = '0px';
+                                    } else {
+                                        // Gemischt/negativ: Höhen über globales Mapping bestimmen
+                                        const y0 = baseTopLocal;          // Baseline in % von oben
+                                        const yP = yPctFor(pNum);
+                                        if (pNum >= 0) {
+                                            // oberhalb der Baseline
+                                            heightPct = Math.max(0, y0 - yP);
+                                            fill.style.top = '';
+                                            fill.style.bottom = (100 - y0) + '%';
+                                        } else {
+                                            // unterhalb der Baseline
+                                            heightPct = Math.max(0, yP - y0);
+                                            fill.style.top = y0 + '%';
+                                            fill.style.bottom = '';
+                                        }
+                                        fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
+                                        fill.style.borderTopLeftRadius = (pNum >= 0) ? 'var(--BorderRadius)' : '0px';
+                                        fill.style.borderTopRightRadius = (pNum >= 0) ? 'var(--BorderRadius)' : '0px';
+                                        fill.style.borderBottomLeftRadius = (pNum < 0) ? 'var(--BorderRadius)' : '0px';
+                                        fill.style.borderBottomRightRadius = (pNum < 0) ? 'var(--BorderRadius)' : '0px';
                                         fill.style.opacity = '1';
-                                        // Inline-Gradient entfernen, damit CSS (inkl. current-hour) greift
                                         fill.style.backgroundImage = '';
                                         try { barindex.removeAttribute('data-nodata'); } catch(e) { /* ignore */ }
                                     }
-
-                                    fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
                                 }
 
-                                // Sichtbaren Min/Max-Index aktualisieren
-                                const pVal = (row && typeof row.price === 'number') ? row.price : 0;
-                                if (pVal > bestMaxVal) { bestMaxVal = pVal; idxMax = i; }
-                                if (pVal < bestMinVal) { bestMinVal = pVal; idxMin = i; }
+                                // Sichtbaren Min/Max-Index aktualisieren (nur echte Daten berücksichtigen)
+                                const pVal = pNum;
+                                if (!noPrice && isFinite(pVal)) {
+                                    if (pVal > bestMaxVal) { bestMaxVal = pVal; idxMax = i; }
+                                    if (pVal < bestMinVal) { bestMinVal = pVal; idxMin = i; }
+                                }
                                 // Preis als Attribut für evtl. spätere Auswertungen ablegen
-                                try { barindex.setAttribute('data-price', String(pVal)); } catch(e) { /* ignore */ }
+                                try { barindex.setAttribute('data-price', isFinite(pVal) ? String(pVal) : ''); } catch(e) { /* ignore */ }
 
                                 // Keine Texte in 15-Minuten-Balken
                                 // Abstände: innerhalb der Stunde kein Abstand; zwischen Stunden kleiner Abstand
@@ -742,8 +838,11 @@
                                         // Zeitfensterbasiert (präzise bei 15-min Daten)
                                         isCurrent = nowEpochSec >= s && nowEpochSec < e;
                                     } else {
-                                        // Fallback: Stunde + Segmentindex
-                                        isCurrent = (hour === currentHourNow && q === currentSeg);
+                                        // Fallback: Anzeige-Stunde ableiten und mit aktuellem Segment vergleichen
+                                        try {
+                                            const displayHour = ((displayStartHour || 0) + hourIndex) % 24;
+                                            isCurrent = (displayHour === currentHourNow && q === currentSeg);
+                                        } catch(e) { isCurrent = false; }
                                     }
                                     if (isCurrent) {
                                         barindex.classList.add('current-hour');
@@ -806,10 +905,10 @@
                        lastHoursToShow = hoursToShow;
                        lastHourAverages = hourAverages.slice();
                        lastBarsPerHour = BarsPerHour;
-                       // Für Mapping die ungeklemmte Baseline verwenden, damit Linien exakt skalieren
+                       // Für Mapping die Baseline für 0 berechnen (nur informativ) und sichtbare Range cachen
                        lastBaselineTopPct = baselineTopPct;
-                       lastLocalMin = localMin;
-                       lastLocalMax = localMax;
+                       lastLocalMin = viewMin;
+                       lastLocalMax = viewMax;
                        lastTotalBars = Math.max(lastTotalBars, expectedBars);
                        lastTotalHours = Math.max(lastTotalHours, hoursToShow);
                        // Stundenhöhe nach Text messen und anwenden, danach Overlay neu zeichnen
@@ -916,6 +1015,54 @@
             } catch (e) { /* ignore */ }
         }
 
+        // Schriftgröße der Stunden automatisch verkleinern, wenn die Zellenbreite nicht ausreicht
+        function autoFitHoursFont(minPx = 8) {
+            try {
+                const hoursEl = document.getElementById('hours');
+                if (!hoursEl) return;
+                // Zurück auf Standard (CSS-Variable) setzen, um die natürliche Größe zu messen
+                const prevInline = hoursEl.style.fontSize;
+                hoursEl.style.fontSize = '';
+                void hoursEl.offsetWidth;
+                // Kleinste vorhandene Zellenbreite ermitteln
+                let minCellW = Infinity;
+                const cells = hoursEl.children || [];
+                let firstVisibleCell = null;
+                for (const c of cells) {
+                    if (!c) continue;
+                    if (c.style.display === 'none') continue;
+                    const rw = c.getBoundingClientRect().width;
+                    if (rw > 0 && rw < minCellW) minCellW = rw;
+                    if (!firstVisibleCell) firstVisibleCell = c;
+                }
+                if (!isFinite(minCellW) || minCellW <= 0) { hoursEl.style.fontSize = prevInline; return; }
+                const margin = 2; // kleiner Innenabstand
+                const allowed = Math.max(0, minCellW - margin);
+                // Mustertext messen (2-stellige Stunde) mit gleicher writing-mode wie Zellen
+                const cs = getComputedStyle(hoursEl);
+                const cw = firstVisibleCell ? getComputedStyle(firstVisibleCell) : cs;
+                const sample = document.createElement('span');
+                sample.textContent = '88';
+                sample.style.visibility = 'hidden';
+                sample.style.position = 'absolute';
+                sample.style.whiteSpace = 'nowrap';
+                sample.style.fontSize = cs.fontSize;
+                sample.style.fontFamily = cs.fontFamily;
+                sample.style.writingMode = cw.writingMode || 'horizontal-tb';
+                hoursEl.appendChild(sample);
+                const need = sample.getBoundingClientRect().width;
+                hoursEl.removeChild(sample);
+                const curFs = parseFloat(cs.fontSize) || 12;
+                if (need > allowed) {
+                    const scale = allowed / need;
+                    const newFs = Math.max(minPx, Math.floor(curFs * scale));
+                    hoursEl.style.fontSize = newFs + 'px';
+                } else {
+                    // wenn ausreichend Platz vorhanden ist, ursprünglichen Inline-Wert zurücksetzen
+                    hoursEl.style.fontSize = prevInline || '';
+                }
+            } catch(e) { /* ignore */ }
+        }
         // Höhe der Preise-Zeile am Text ausrichten und an CSS-Variable binden
         function measurePricesHeight() {
             try {
@@ -944,18 +1091,15 @@
                 const safeRange = range === 0 ? 1 : range;
                 let vertPad = 0; // Mapping ohne zusätzlichen Puffer, ausgerichtet an der Baseline
                 function yForPrice(p) {
-                    const baselineTopPx = overlayRect.height * (lastBaselineTopPct / 100);
-                    if (p >= 0) {
-                        const posRange = (lastLocalMax > 0) ? lastLocalMax : 1;
-                        const posAvailPx = baselineTopPx; // Raum oberhalb der Baseline
-                        const y = baselineTopPx - (p / posRange) * posAvailPx;
-                        return Math.max(0, Math.min(overlayRect.height - 1, y));
-                    } else {
-                        const negRange = (lastLocalMin < 0) ? Math.abs(lastLocalMin) : 1;
-                        const negAvailPx = overlayRect.height - baselineTopPx; // Raum unterhalb der Baseline
-                        const y = baselineTopPx + (Math.abs(p) / negRange) * negAvailPx;
-                        return Math.max(0, Math.min(overlayRect.height - 1, y));
-                    }
+                    // Lineare Abbildung mit Innenabstand: [lastLocalMin..lastLocalMax] -> [pad..H-pad]
+                    const span = (lastLocalMax - lastLocalMin) || 1;
+                    let t = (p - lastLocalMin) / span; // 0..1
+                    if (!isFinite(t)) t = 0;
+                    t = Math.max(0, Math.min(1, t));
+                    const innerPadPx = 6; // vertikaler Innenabstand
+                    const usable = Math.max(1, overlayRect.height - innerPadPx * 2);
+                    const y = innerPadPx + (1 - t) * usable;
+                    return Math.max(0, Math.min(overlayRect.height - 1, y));
                 }
                 if (!ShowGrid) {
                     // Kein Raster: linken Gutter minimieren
@@ -990,17 +1134,18 @@
                             }
                             arr.push({ price, text: price.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
                         }
-                        // Von der Nulllinie nach oben (ohne Nulllinie)
-                        for (let q = stepVal; q <= lastLocalMax + eps; q += stepVal) { pushUniqueLocal(q); }
-                        // Von der Nulllinie nach unten (ohne Nulllinie)
-                        for (let q = -stepVal; q >= lastLocalMin - eps; q -= stepVal) { pushUniqueLocal(q); }
-                        return arr; // Extremwerte hier bewusst NICHT enthalten
+                        // Sichtbereich: von sichtbarem Minimum bis sichtbarem Maximum in Schrittweite
+                        const start = Math.ceil((lastLocalMin + eps) / stepVal) * stepVal;
+                        for (let q = start; q <= lastLocalMax + eps; q += stepVal) { pushUniqueLocal(q); }
+                        return arr; // Extremwerte fügen wir separat hinzu
                     }
                     function addExtremeLabels(list) {
-                        // Max immer, Min nur wenn negativ
+                        // Max immer ergänzen; Min nur bei negativen sichtbaren Min-Werten
                         const exists = (p) => list.some(it => Math.abs(it.price - p) < eps);
                         if (!exists(lastLocalMax)) list.push({ price: lastLocalMax, text: lastLocalMax.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
-                        if (lastLocalMin < 0 && !exists(lastLocalMin)) list.push({ price: lastLocalMin, text: lastLocalMin.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
+                        if (lastLocalMin < 0 && !exists(lastLocalMin)) {
+                            list.push({ price: lastLocalMin, text: lastLocalMin.toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '') });
+                        }
                         return list;
                     }
                     function minSpacingPxFor(labels) {
@@ -1015,14 +1160,24 @@
                         }
                         return minPx;
                     }
+                    // Dynamische Schrittweite: Standard 5 ct. Bei zu dichter Beschriftung -> 10 ct, bei zu großem Abstand -> 2.5 ct
                     let step = 5; // ct (Standard)
                     // Dichteprüfung ausschließlich auf regulären Rasterlabels (ohne Extremwerte)
                     let gridOnly = generateGridLabels(step);
-                    // Umschalten erst, wenn sich die Labels nahezu berühren: (Labelhöhe + 1px)
-                    const spacingThreshold = Math.max(4, (maxLabelH || 0) + 1);
-                    if (minSpacingPxFor(gridOnly) < spacingThreshold) {
-                        step = 10;
+                    const spacingDenseThreshold  = Math.max(4, (maxLabelH || 0) + 1);      // Labels dürfen sich nicht berühren
+                    const spacingSparseThreshold = Math.max(spacingDenseThreshold * 3, 60); // wenn Abstand sehr groß ist -> dichteres Raster
+                    const spacing5 = minSpacingPxFor(gridOnly);
+                    if (spacing5 < spacingDenseThreshold) {
+                        step = 10; // dichter -> Schritt erhöhen
                         gridOnly = generateGridLabels(step);
+                    } else if (spacing5 > spacingSparseThreshold) {
+                        step = 2.5; // zu viel Luft -> Schritt verkleinern
+                        gridOnly = generateGridLabels(step);
+                        // Sicherheitscheck: falls jetzt zu dicht geworden, wieder auf 5 ct zurück
+                        if (minSpacingPxFor(gridOnly) < spacingDenseThreshold) {
+                            step = 5;
+                            gridOnly = generateGridLabels(step);
+                        }
                     }
                     // Für die tatsächliche Darstellung: Rasterlabels + Extremwerte kombinieren
                     let labelsToMeasure = addExtremeLabels(gridOnly.slice());
@@ -1055,8 +1210,13 @@
                     // Jetzt echte Linien + Labels innerhalb des Overlays rendern (links im Gutter)
                     const createdLabels = [];
                     for (const item of labelsToMeasure) {
-                        const y = yForPrice(item.price);
-                        const isExtreme = (Math.abs(item.price - lastLocalMax) < eps) || (Math.abs(item.price - lastLocalMin) < eps);
+                        const isMax = Math.abs(item.price - lastLocalMax) < eps;
+                        const isMin = Math.abs(item.price - lastLocalMin) < eps;
+                        let y = yForPrice(item.price);
+                        // Extremwerte exakt an die Kanten legen
+                        if (isMax) y = 0;
+                        if (isMin) y = overlayRect.height - 1;
+                        const isExtreme = isMax || isMin;
                         if (Math.abs(item.price) < eps && !isExtreme) { continue; } // keine Linie auf der Nulllinie, außer Min/Max
                         const line = document.createElement('div');
                         line.className = 'gridline' + (isExtreme ? ' gridline-max' : '');
@@ -1089,7 +1249,7 @@
                             if (lh > 0) {
                                 // zentrieren und an den Overlay-Rändern einklemmen, damit nichts abgeschnitten wird
                                 let tp = y - (lh / 2);
-                                // Für Extremwerte Abstand zur Linie vergrößern: Max nach oben, Min nach unten
+                                // Für Extremwerte Abstand zur Linie vergrößern: Max nach unten, Min nach oben
                                 const isMax = Math.abs(item.price - lastLocalMax) < eps;
                                 const isMin = Math.abs(item.price - lastLocalMin) < eps;
                                 let extremeGap = 10; // Default px Abstand zur Linie
@@ -1098,8 +1258,8 @@
                                     const parsed = parseFloat(cssGap);
                                     if (isFinite(parsed)) extremeGap = parsed;
                                 } catch(e) { /* ignore */ }
-                                if (isMax) tp -= extremeGap;
-                                if (isMin) tp += extremeGap;
+                                if (isMax) tp += extremeGap; // bewege von der oberen Kante weg
+                                if (isMin) tp -= extremeGap; // bewege von der unteren Kante weg
                                 if (tp < 0) tp = 0;
                                 const maxTop = (overlayRect.height - lh);
                                 if (tp > maxTop) tp = maxTop;
@@ -1131,22 +1291,25 @@
                     } catch(e) { /* ignore */ }
                     // Dediziertes Preislabel an der Nulllinie (ohne Linie)
                     try {
-                        const y0 = yForPrice(0);
-                        const zeroLbl = document.createElement('div');
-                        zeroLbl.className = 'gridprice';
-                        zeroLbl.textContent = (0).toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '');
-                        zeroLbl.style.top = y0 + 'px';
-                        zeroLbl.style.textAlign = 'right'; // ensure right alignment on first render
-                        overlay.appendChild(zeroLbl);
-                        // zentrieren und Rand-Clamping
-                        const lh0 = zeroLbl.offsetHeight || 0;
-                        if (lh0 > 0) {
-                            let tp0 = y0 - (lh0 / 2);
-                            if (tp0 < 0) tp0 = 0;
-                            const maxTop0 = (overlayRect.height - lh0);
-                            if (tp0 > maxTop0) tp0 = maxTop0;
-                            zeroLbl.style.top = tp0 + 'px';
-                            zeroLbl.style.transform = 'none';
+                        // Nur anzeigen, wenn 0 im sichtbaren Bereich liegt
+                        if (0 >= lastLocalMin - eps && 0 <= lastLocalMax + eps) {
+                            const y0 = yForPrice(0);
+                            const zeroLbl = document.createElement('div');
+                            zeroLbl.className = 'gridprice';
+                            zeroLbl.textContent = (0).toFixed(BarPriceRound) + (ShowCtSuffix ? ' ct' : '');
+                            zeroLbl.style.top = y0 + 'px';
+                            zeroLbl.style.textAlign = 'right'; // ensure right alignment on first render
+                            overlay.appendChild(zeroLbl);
+                            // zentrieren und Rand-Clamping
+                            const lh0 = zeroLbl.offsetHeight || 0;
+                            if (lh0 > 0) {
+                                let tp0 = y0 - (lh0 / 2);
+                                if (tp0 < 0) tp0 = 0;
+                                const maxTop0 = (overlayRect.height - lh0);
+                                if (tp0 > maxTop0) tp0 = maxTop0;
+                                zeroLbl.style.top = tp0 + 'px';
+                                zeroLbl.style.transform = 'none';
+                            }
                         }
                     } catch(e) { /* ignore */ }
                 }
@@ -1202,6 +1365,39 @@
                             label.style.opacity = '0.3';
                         }
                         overlay.appendChild(label);
+                        // Nach dem Einfügen: Schrift automatisch verkleinern
+                        //  - Bei 15-Minuten-Preisen (>=4 Balken/Stunde): verfügbare Breite = gesamte Stundenbreite (alle 4 Balken)
+                        //  - Sonst: verfügbare Breite = Breite eines einzelnen Balkens
+                        try {
+                            window.requestAnimationFrame(() => {
+                                try {
+                                    const firstBar = document.getElementById('bar_' + firstIdx);
+                                    const lastBar  = document.getElementById('bar_' + lastIdx);
+                                    let barW = 0;
+                                    if (firstBar) {
+                                        barW = firstBar.getBoundingClientRect().width;
+                                    }
+                                    if ((!barW || barW <= 0) && lastBar) {
+                                        barW = lastBar.getBoundingClientRect().width;
+                                    }
+                                    if (barW > 0) {
+                                        const lr = label.getBoundingClientRect();
+                                        const margin = 1; // kleiner Sicherheitsabstand links/rechts
+                                        let allowed = Math.max(0, barW - margin);
+                                        // Bei 15-Minuten (>=4 Balken): 4x Balkenbreite als verfügbarer Raum
+                                        if (lastBarsPerHour >= 4) {
+                                            allowed = Math.max(0, (barW * 4) - margin);
+                                        }
+                                        if (lr.width > allowed) {
+                                            const curFs = parseFloat(getComputedStyle(label).fontSize) || 12;
+                                            const scale = allowed / lr.width;
+                                            const newFs = Math.max(8, Math.floor(curFs * scale));
+                                            label.style.fontSize = newFs + 'px';
+                                        }
+                                    }
+                                } catch(e) { /* ignore */ }
+                            });
+                        } catch(e) { /* ignore */ }
                     }
                 }
             } catch (e) {
@@ -1209,7 +1405,7 @@
             }
         }
         // Bei Größenänderung neu messen und neu positionieren
-        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} }));
+        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} }));
     </script>
 </body>
 </html>

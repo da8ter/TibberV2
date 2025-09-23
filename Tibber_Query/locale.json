@@ -59,6 +59,7 @@
             "backgroundcolor of the actually hour":"Hintergrundfarbe der aktuellen Stunde",
             "Barsettings":"Einstellungen Balken",
             "set the scale of the bar, values between 1-10 are allowed":"Legen Sie die Skala des Balkens fest, Werte zwischen 1-10 sind zulässig.",
+            "Cropping scale: 0 disables, 1-10 = 10%-100% of [0..min]":"Skalierung: 0 deaktiviert, 1-10 = 10%-100% von [0..min]",
             "set the border radius of the bars":"setze Balkenradius",
             "gradient for the bars":"Farbverlauf der Balken",
             "start gradient":"Beginn Farbe",
