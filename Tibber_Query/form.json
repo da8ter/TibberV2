@@ -2,6 +2,15 @@
     "elements": 
     [
         {   "type": "CheckBox",
+            "name": "Enable_15m",
+            "caption": "Enable 15-minute prices"
+        },
+        {   "type": "CheckBox",
+            "name": "DemoMode",
+            "caption": "Demo mode (simulate 15-minute data)",
+            "visible": false
+        },
+        {   "type": "CheckBox",
         "name": "InstanceActive",
         "caption": "activate Instance"
         },
@@ -29,10 +38,15 @@
                         "caption": "Log price data variable",
                         "visible": true,
                         "enabled": true
-                    },            
+                    },
                     {   "type": "CheckBox",
                         "name": "Price_Variables",
                         "caption": "Price - create variables per hour (24 for current day & 24 for day ahead day)",
+                        "visible": true
+                    },
+                    {   "type": "CheckBox",
+                        "name": "Price_Variables_15m",
+                        "caption": "Price - create variables per 15 minutes (96 for current day & 96 for day ahead day)",
                         "visible": true
                     },
                     {   "type": "CheckBox",
@@ -43,7 +57,7 @@
                     {
                         "type": "CheckBox",
                         "name": "Ahead_Price_Data_bool",
-                        "caption": "Create price ahead variable for energy optimizer",
+                        "caption": "Create variables for energy optimizer (hourly + 15-minute)",
                         "visible": true
                     }
                 ]
@@ -101,12 +115,17 @@
                         "minimum": 12,
                         "maximum": 48
                     },
+                    {   "type": "CheckBox",
+                        "name": "HTML_OnlyPriceBars",
+                        "caption": "Only show bars with price info",
+                        "visible": true
+                    },
                     {   "type": "NumberSpinner",
                         "name": "HTML_Scale",
-                        "caption": "set the scale of the bar, values between 1-10 are allowed",
+                        "caption": "Cropping scale: 0 disables, 1-10 = 10%-100% of [0..min]",
                         "width":"400px",
                         "digits": 0, 
-                        "minimum": 1,
+                        "minimum": 0,
                         "maximum": 10
                     },
                     {   "type": "NumberSpinner",
@@ -134,6 +153,23 @@
                                 "allowTransparent": "false",
                                 "name": "HTML_BGCstopG",
                                 "caption": "stop gradient"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "RowLayout",
+                        "items": [
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGCstartG_Current",
+                                "caption": "start gradient (current bar)"
+                            },
+                            {
+                                "type": "SelectColor",
+                                "allowTransparent": "false",
+                                "name": "HTML_BGCstopG_Current",
+                                "caption": "stop gradient (current bar)"
                             }
                         ]
                     },
@@ -211,6 +247,17 @@
                                 "type": "CheckBox",
                                 "name": "HTML_Bar_Price_vis_ct",
                                 "caption": "show ct suffix"
+                            },
+                            {
+                                "type": "CheckBox",
+                                "name": "HTML_Bar_Show_Prices",
+                                "caption": "show prices in bars"
+                            },
+                            {
+                                "type": "CheckBox",
+                                "name": "HTML_Show_Grid",
+                                "caption": "show gridlines and prices",
+                                "value": false
                             }
                         ]
                     }                                        
@@ -339,6 +386,45 @@
                     ]
                 }
 
+                ,
+                { 
+                    "type": "Label", 
+                    "caption": "Fontsize price scale" 
+                },
+                { 
+                    "type": "RowLayout",
+                    "items": [
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMinS",
+                        "caption": "set minimum fontsize in px",
+                        "digits": 0,
+                        "minimum": 1,
+                        "maximum": 15,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeDefS",
+                        "width":"400px",
+                        "caption": "set default fontsize in vw. 1vw corresponds to 1% of the width of the viewport",
+                        "digits": 0,
+                        "minimum": 0,
+                        "maximum": 5,
+                        "visible": true
+                    },
+                    {   
+                        "type": "NumberSpinner",
+                        "name": "HTML_FontSizeMaxS",
+                        "caption": "set maximum fontsize in px",
+                        "digits": 0,
+                        "minimum": 16,
+                        "maximum": 30,
+                        "visible": true
+                    }
+                    ]
+                }
+
                 ]
         }
            
@@ -359,6 +445,11 @@
             "type": "Button",
             "label": "Reset HTML settings",
             "onClick": "IPS_RequestAction($id, 'ResetHTML', '');"
+          },
+          {
+            "type": "Button",
+            "label": "Reload visualization",
+            "onClick": "IPS_RequestAction($id, 'reload', '');"
           }
     ],
     "status": [
