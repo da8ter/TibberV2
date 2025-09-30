@@ -1,0 +1,12 @@
+{
+    "id": "{7FBEA60D-624E-7C84-930E-530C75790C86}",
+    "name": "Tibber",
+    "type": 3,
+    "vendor": "Tibber",
+    "aliases": ["Tibber V.2"],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "TIBV2",
+    "url": "https://github.com/da8ter/TibberV2/blob/main/Tibber_Query/README.md"
+}

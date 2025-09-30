@@ -1,0 +1,12 @@
+{
+    "id": "{6788334F-B0F7-2BAC-43AE-C0A3E751421E}",
+    "name": "Tibber_Realtime",
+    "type": 3,
+    "vendor": "Tibber",
+    "aliases": ["Tibber Realtime V.2"],
+    "parentRequirements": ["{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}"],
+    "childRequirements": [],
+    "implemented": ["{018EF6B5-AB94-40C6-AA53-46943E824ACF}"],
+    "prefix": "TIBRTV2",
+    "url": "https://github.com/da8ter/TibberV2/blob/main/Tibber_Realtime/README.md"
+}
