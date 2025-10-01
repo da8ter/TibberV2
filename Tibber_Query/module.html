@@ -1037,7 +1037,7 @@
                        lastTotalBars = Math.max(lastTotalBars, expectedBars);
                        lastTotalHours = Math.max(lastTotalHours, hoursToShow);
                        // Stundenhöhe nach Text messen und anwenden, danach Overlay neu zeichnen
-                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
+                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { updateAllGradientPositions(); } catch(e) {} });
                            
                         break;
                         case 'reload':
@@ -1541,8 +1541,65 @@
                 // ignore
             }
         }
+        // Gradient-Positionen aller Balken aktualisieren (nach Layout-Änderung)
+        function updateAllGradientPositions() {
+            try {
+                const bars = document.getElementById('bars');
+                if (!bars) return;
+                const barsRect = bars.getBoundingClientRect();
+                const barsHeightPx = Math.ceil(barsRect.height || 0);
+                if (barsHeightPx <= 0) return;
+                // Alle sichtbaren Balken durchgehen
+                for (let i = 0; i < lastTotalBars; i++) {
+                    const barEl = document.getElementById('bar_' + i);
+                    if (!barEl || barEl.style.display === 'none') continue;
+                    const fill = barEl.firstElementChild || barEl.querySelector('.bar-inner');
+                    if (!fill) continue;
+                    // Preis aus Attribut holen
+                    const priceStr = barEl.getAttribute('data-price');
+                    const pNum = parseFloat(priceStr);
+                    if (!isFinite(pNum)) continue;
+                    const nodata = barEl.getAttribute('data-nodata') === '1';
+                    if (nodata) continue;
+                    // viewMin/viewMax aus Cache
+                    const viewMin = lastLocalMin;
+                    const viewMax = lastLocalMax;
+                    const baseTopLocal = lastBaselineTopPct;
+                    const fullRange = (viewMax - viewMin) || 1;
+                    function yPctForLocal(val) {
+                        let t = (val - viewMin) / fullRange;
+                        if (!isFinite(t)) t = 0;
+                        t = Math.max(0, Math.min(1, t));
+                        return 100 * (1 - t);
+                    }
+                    // Background-Position je nach Range neu berechnen
+                    if (viewMin >= 0) {
+                        // Positiv-only
+                        const denom = (viewMax - viewMin) || 1;
+                        const frac = Math.max(0, Math.min(1, (pNum - viewMin) / denom));
+                        const heightPct = frac * 100;
+                        const topPct = 100 - heightPct;
+                        const bgPosY = - (barsHeightPx * topPct / 100);
+                        fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                    } else {
+                        // Gemischt/negativ
+                        const yP = yPctForLocal(pNum);
+                        if (pNum >= 0) {
+                            const heightPct = Math.max(0, baseTopLocal - yP);
+                            const topPct = Math.max(0, baseTopLocal - heightPct);
+                            const bgPosY = - (barsHeightPx * topPct / 100);
+                            fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                        } else {
+                            const bgPosY = - (barsHeightPx * baseTopLocal / 100);
+                            fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                        }
+                    }
+                }
+            } catch(e) { /* ignore */ }
+        }
+
         // Bei Größenänderung neu messen und neu positionieren
-        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} }));
+        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { updateAllGradientPositions(); } catch(e) {} }));
     </script>
 </body>
 </html>
