@@ -279,6 +279,8 @@
         let lastIndexMaxBar = -1;
         // Pro Stunde: gibt es valide (!=0) Daten in dieser Stunde?
         let lastHourHasData = [];
+        // Zuletzt gerenderter Datensatz für spätere Neupositionierung
+        let lastDataset = [];
 
         let bars = document.getElementById("bars");
         for(let i = 0; i < 96; i++) { // 24h * 4 Balken (Initial)
@@ -435,7 +437,7 @@
                     case 'FontSizePrices':
                        root.style.setProperty('--FontSizePrices', 'clamp('+data[parameter]+')');
                        // prices row height depends on its font size; re-measure and rebuild overlay
-                       window.requestAnimationFrame(() => { try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
+                       window.requestAnimationFrame(() => { try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { repositionGradients(); } catch(e) {} });
                     break;
                     case 'FontSizeScale':
                        // separate scale (grid price labels) font size
@@ -531,12 +533,14 @@
                             // Per-Bar flex basis: (Stundenbreite - 2px Margins) / BarsPerHour
                             root.style.setProperty('--CountBars', '0 0 calc((((100% - ('+(hoursN*2)+'px)) / '+hoursN+') - 2px) / '+BPH+')');
                         } catch(e) { /* ignore */ }
-                        window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
+                        window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { repositionGradients(); } catch(e) {} });
                     break; 
                                         
                     case 'Ahead_Price_Data':
                        // Datensatz übernehmen und Granularität erkennen (1h oder 15min)
                        const dataset = data[parameter];
+                       // Für spätere Layout-basierte Neupositionierung cachen
+                       try { lastDataset = Array.isArray(dataset) ? dataset.slice() : []; } catch(e) { lastDataset = []; }
                        // Granularität erkennen
                        try {
                            let detected = BarsPerHour;
@@ -1037,7 +1041,7 @@
                        lastTotalBars = Math.max(lastTotalBars, expectedBars);
                        lastTotalHours = Math.max(lastTotalHours, hoursToShow);
                        // Stundenhöhe nach Text messen und anwenden, danach Overlay neu zeichnen
-                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { updateAllGradientPositions(); } catch(e) {} });
+                       window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} });
                            
                         break;
                         case 'reload':
@@ -1057,6 +1061,8 @@
                 const queued = window._pendingMessages || [];
                 window._pendingMessages = [];
                 for (const m of queued) { handleMessage(m); }
+                // Nach dem Abarbeiten und erstem Layout sicherstellen, dass der Verlauf korrekt verankert ist
+                window.requestAnimationFrame(() => { try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { repositionGradients(); } catch(e) {} });
             } catch(e) { /* ignore */ }
             
         // Demo-Modus: bei ?demo=1 oder ?demo=true 24h×4 Testdaten erzeugen
@@ -1201,6 +1207,69 @@
                 document.documentElement.style.setProperty('--PricesH', h + 'px');
                 pricesEl.style.height = prevInlineHeight && prevInlineHeight !== 'auto' ? prevInlineHeight : '';
             } catch (e) { /* ignore */ }
+        }
+
+
+        // Nach Layoutänderungen Gradienten vertikal neu an die Containerhöhe ausrichten
+        function repositionGradients() {
+            try {
+                const barsEl = document.getElementById('bars');
+                if (!barsEl) return;
+                const rect = barsEl.getBoundingClientRect();
+                const H = Math.ceil(rect.height || 0);
+                if (!isFinite(H) || H <= 0) {
+                    // Noch keine stabile Höhe -> im nächsten Frame erneut versuchen
+                    window.requestAnimationFrame(repositionGradients);
+                    return;
+                }
+                document.documentElement.style.setProperty('--BarsHeightPx', H + 'px');
+                const dataset = Array.isArray(lastDataset) ? lastDataset : [];
+                const hoursN = (typeof lastHoursToShow === 'number' && lastHoursToShow > 0) ? lastHoursToShow : 24;
+                const bph    = (typeof lastBarsPerHour === 'number' && lastBarsPerHour > 0) ? lastBarsPerHour : 4;
+                const expectedBars = Math.min(dataset.length, hoursN * bph);
+                const viewMin = lastLocalMin;
+                const viewMax = lastLocalMax;
+                if (!isFinite(viewMin) || !isFinite(viewMax)) return;
+                const fullRange = (viewMax - viewMin) || 1;
+                function yPctFor(val) {
+                    let t = (val - viewMin) / fullRange; // 0..1
+                    if (!isFinite(t)) t = 0;
+                    t = Math.max(0, Math.min(1, t));
+                    return 100 * (1 - t); // 0% oben, 100% unten
+                }
+                const y0 = Math.max(0, Math.min(100, lastBaselineTopPct));
+                for (let i = 0; i < expectedBars; i++) {
+                    const row = dataset[i];
+                    const bar = document.getElementById('bar_' + i);
+                    if (!bar) continue;
+                    const fill = bar.firstElementChild || bar.querySelector('.bar-inner');
+                    if (!fill) continue;
+                    const pNum = (row && typeof row.price === 'number') ? row.price : NaN;
+                    const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
+                    const baseNoData = !isFinite(pNum) || (row && row.nodata === true);
+                    const noPrice = baseNoData || (pNum === 0 && !hasLevel);
+                    if (noPrice) continue;
+                    let bgPosY = 0;
+                    if (viewMin >= 0) {
+                        const denom = (viewMax - viewMin) || 1;
+                        const frac = Math.max(0, Math.min(1, (pNum - viewMin) / denom));
+                        const heightPct = frac * 100;
+                        const topPct = 100 - heightPct;
+                        bgPosY = - (H * topPct / 100);
+                    } else {
+                        const yP = yPctFor(pNum);
+                        if (pNum >= 0) {
+                            const heightPct = Math.max(0, y0 - yP);
+                            const topPct = Math.max(0, y0 - heightPct);
+                            bgPosY = - (H * topPct / 100);
+                        } else {
+                            const topPct = y0;
+                            bgPosY = - (H * topPct / 100);
+                        }
+                    }
+                    fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                }
+            } catch(e) { /* ignore */ }
         }
 
 
@@ -1541,65 +1610,8 @@
                 // ignore
             }
         }
-        // Gradient-Positionen aller Balken aktualisieren (nach Layout-Änderung)
-        function updateAllGradientPositions() {
-            try {
-                const bars = document.getElementById('bars');
-                if (!bars) return;
-                const barsRect = bars.getBoundingClientRect();
-                const barsHeightPx = Math.ceil(barsRect.height || 0);
-                if (barsHeightPx <= 0) return;
-                // Alle sichtbaren Balken durchgehen
-                for (let i = 0; i < lastTotalBars; i++) {
-                    const barEl = document.getElementById('bar_' + i);
-                    if (!barEl || barEl.style.display === 'none') continue;
-                    const fill = barEl.firstElementChild || barEl.querySelector('.bar-inner');
-                    if (!fill) continue;
-                    // Preis aus Attribut holen
-                    const priceStr = barEl.getAttribute('data-price');
-                    const pNum = parseFloat(priceStr);
-                    if (!isFinite(pNum)) continue;
-                    const nodata = barEl.getAttribute('data-nodata') === '1';
-                    if (nodata) continue;
-                    // viewMin/viewMax aus Cache
-                    const viewMin = lastLocalMin;
-                    const viewMax = lastLocalMax;
-                    const baseTopLocal = lastBaselineTopPct;
-                    const fullRange = (viewMax - viewMin) || 1;
-                    function yPctForLocal(val) {
-                        let t = (val - viewMin) / fullRange;
-                        if (!isFinite(t)) t = 0;
-                        t = Math.max(0, Math.min(1, t));
-                        return 100 * (1 - t);
-                    }
-                    // Background-Position je nach Range neu berechnen
-                    if (viewMin >= 0) {
-                        // Positiv-only
-                        const denom = (viewMax - viewMin) || 1;
-                        const frac = Math.max(0, Math.min(1, (pNum - viewMin) / denom));
-                        const heightPct = frac * 100;
-                        const topPct = 100 - heightPct;
-                        const bgPosY = - (barsHeightPx * topPct / 100);
-                        fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
-                    } else {
-                        // Gemischt/negativ
-                        const yP = yPctForLocal(pNum);
-                        if (pNum >= 0) {
-                            const heightPct = Math.max(0, baseTopLocal - yP);
-                            const topPct = Math.max(0, baseTopLocal - heightPct);
-                            const bgPosY = - (barsHeightPx * topPct / 100);
-                            fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
-                        } else {
-                            const bgPosY = - (barsHeightPx * baseTopLocal / 100);
-                            fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
-                        }
-                    }
-                }
-            } catch(e) { /* ignore */ }
-        }
-
         // Bei Größenänderung neu messen und neu positionieren
-        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { updateAllGradientPositions(); } catch(e) {} }));
+        window.addEventListener('resize', () => window.requestAnimationFrame(() => { try { autoFitHoursFont(); } catch(e) {} try { measureHoursHeight(); } catch(e) {} try { measurePricesHeight(); } catch(e) {} try { rebuildOverlay(); } catch(e) {} try { repositionGradients(); } catch(e) {} }));
     </script>
 </body>
 </html>
