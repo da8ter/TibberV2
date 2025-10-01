@@ -641,10 +641,11 @@
                        const expectedBars = hoursToShow * BarsPerHour;
                        // Höhe des Balken-Containers messen und als CSS-Variable setzen,
                        // damit der Farbverlauf in allen Balken identisch skaliert wird
+                       let barsHeightPx = 0;
                        try {
                            const barsRect = bars.getBoundingClientRect();
-                           const hpx = Math.ceil(barsRect.height || 0);
-                           if (hpx > 0) { root.style.setProperty('--BarsHeightPx', hpx + 'px'); }
+                           barsHeightPx = Math.ceil(barsRect.height || 0);
+                           if (barsHeightPx > 0) { root.style.setProperty('--BarsHeightPx', barsHeightPx + 'px'); }
                        } catch(e) { /* ignore */ }
                        // Prozent-Mapping über die gesamte sichtbare Range
                        const fullRange = (viewMax - viewMin) || 1;
@@ -852,6 +853,12 @@
                                         fill.style.top = '';
                                         fill.style.bottom = '0';
                                         fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
+                                        // Gradient global an Container ausrichten: Unterkante = globales Minimum
+                                        try {
+                                            const topPct = 100 - heightPct; // Top des Füllbalkens in % vom Container-Top
+                                            const bgPosY = - (barsHeightPx * topPct / 100);
+                                            fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                                        } catch(e) { /* ignore */ }
                                         fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
                                         fill.style.borderTopRightRadius = 'var(--BorderRadius)';
                                         fill.style.borderBottomLeftRadius = '0px';
@@ -868,11 +875,22 @@
                                             heightPct = Math.max(0, y0 - yP);
                                             fill.style.top = '';
                                             fill.style.bottom = (100 - y0) + '%';
+                                            // Gradient an Container ausrichten: Top = (y0 - heightPct)%
+                                            try {
+                                                const topPct = Math.max(0, y0 - heightPct);
+                                                const bgPosY = - (barsHeightPx * topPct / 100);
+                                                fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                                            } catch(e) { /* ignore */ }
                                         } else {
                                             // unterhalb der Baseline
                                             heightPct = Math.max(0, yP - y0);
                                             fill.style.top = y0 + '%';
                                             fill.style.bottom = '';
+                                            // Gradient an Container ausrichten: Top = y0%
+                                            try {
+                                                const bgPosY = - (barsHeightPx * y0 / 100);
+                                                fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                                            } catch(e) { /* ignore */ }
                                         }
                                         fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
                                         fill.style.borderTopLeftRadius = (pNum >= 0) ? 'var(--BorderRadius)' : '0px';
