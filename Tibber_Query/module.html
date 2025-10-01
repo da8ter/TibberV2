@@ -65,6 +65,10 @@
             width: 100%;
             height: 0%;
             background-image: var(--Gradient, linear-gradient(to top, #28cdab, #1d8b75));
+            /* Einheitliche Gradienten-Skalierung über die gesamte Balkenhöhe */
+            background-repeat: no-repeat;
+            background-position: left bottom;
+            background-size: 100% var(--BarsHeightPx, 100%);
             opacity: 1;
             z-index: 1;
         }
@@ -258,6 +262,8 @@
         let OnlyPriceBars = false; // nur Balken mit Preis-Info anzeigen
         // Referenz auf :root für CSS-Variablen
         const root = document.documentElement;
+        // Aktuellen Preis (aus Backend-Variable) puffern und bevorzugt anzeigen
+        let LastActPrice = null;
         // Overlay-Cache für stabile Positionierung
         let lastHoursToShow = 0;
         let lastHourAverages = [];
@@ -336,6 +342,20 @@
                 switch (parameter) {
                     case 'price_cur':
                         if (element) element.innerHTML = data[parameter] + (ShowCtSuffix ? '&nbsp;ct' : '');
+                    break;
+                    case 'act_price':
+                        // Bevorzugter aktueller Preis aus Backend-Variable
+                        try {
+                            let v = (typeof data[parameter] === 'number') ? data[parameter] : parseFloat(data[parameter]);
+                            if (isFinite(v)) {
+                                LastActPrice = v;
+                                const elCur = document.getElementById('price_cur');
+                                if (elCur) {
+                                    const round = (typeof BarPriceRound === 'number' ? BarPriceRound : 2);
+                                    elCur.innerHTML = v.toFixed(round) + (ShowCtSuffix ? '&nbsp;ct' : '');
+                                }
+                            }
+                        } catch(e) { /* ignore */ }
                     break;
                     case 'price_min':
                         if (element) element.innerHTML = data[parameter] + (ShowCtSuffix ? '&nbsp;ct' : '');
@@ -619,6 +639,13 @@
                            : 24;
                        if (hoursToShow > 48) hoursToShow = 48;
                        const expectedBars = hoursToShow * BarsPerHour;
+                       // Höhe des Balken-Containers messen und als CSS-Variable setzen,
+                       // damit der Farbverlauf in allen Balken identisch skaliert wird
+                       try {
+                           const barsRect = bars.getBoundingClientRect();
+                           const hpx = Math.ceil(barsRect.height || 0);
+                           if (hpx > 0) { root.style.setProperty('--BarsHeightPx', hpx + 'px'); }
+                       } catch(e) { /* ignore */ }
                        // Prozent-Mapping über die gesamte sichtbare Range
                        const fullRange = (viewMax - viewMin) || 1;
                        function yPctFor(val) {
@@ -750,6 +777,8 @@
                        const nowEpochSec = Math.floor(now.getTime() / 1000);
                        const currentHourNow = now.getHours();
                        const currentMinuteNow = now.getMinutes();
+                       // Capture the currently active segment's price for the "Aktuell" label
+                       let currentDisplayPrice = null;
                        const segSize = Math.max(1, Math.floor(60 / BarsPerHour));
                        let currentSeg = Math.floor(currentMinuteNow / segSize);
                        if (currentSeg >= BarsPerHour) currentSeg = BarsPerHour - 1;
@@ -939,6 +968,23 @@
                        // Indizes für Min-/Max-Balken für Overlay-Linien cachen
                        lastIndexMaxBar = idxMax;
                        lastIndexMinBar = idxMin;
+                       // Update the "Aktuell" KPI preferring act_price (LastActPrice),
+                       // then the current segment, then fallback to the hourly average of the first visible hour
+                       try {
+                           const elCur = document.getElementById('price_cur');
+                           if (elCur) {
+                               let v = (typeof LastActPrice === 'number' && isFinite(LastActPrice)) ? LastActPrice : null;
+                               if (v === null) {
+                                   v = (typeof currentDisplayPrice === 'number' && isFinite(currentDisplayPrice)) ? currentDisplayPrice : null;
+                               }
+                               if (v === null) {
+                                   const hv = Array.isArray(hourAverages) ? hourAverages[0] : null;
+                                   if (typeof hv === 'number' && isFinite(hv)) v = hv;
+                               }
+                               if (typeof v !== 'number' || !isFinite(v)) v = 0;
+                               elCur.innerHTML = v.toFixed(BarPriceRound) + (ShowCtSuffix ? '&nbsp;ct' : '');
+                           }
+                       } catch(e) { /* ignore */ }
 
                        // Fallback: Falls kein Balken per Zeitfenster markiert wurde, markiere den erwarteten aktuellen Index
                        try {

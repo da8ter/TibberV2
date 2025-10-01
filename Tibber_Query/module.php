@@ -1388,6 +1388,11 @@ require_once __DIR__ . '/../libs/functions.php';
                     }
                 }
                 $result['price_cur']    = $AVGPriceVal[0];
+                // Provide exact current price from variable for frontend preference
+                try {
+                    $act = $this->GetValue('act_price');
+                    if (is_numeric($act)) { $result['act_price'] = round(floatval($act), 2); }
+                } catch (Exception $e) { /* ignore if not available */ }
 			}
 			
 			            $result['BGCHour'] 			= sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorHour"));
