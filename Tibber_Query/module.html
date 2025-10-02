@@ -77,6 +77,19 @@
             background-image: var(--GradientCurrent, var(--Gradient, linear-gradient(to top, #28cdab, #1d8b75)));
         }
 
+        /* 15-Minuten: jeden zweiten Balken leicht abdunkeln (10% Schwarz-Overlay) */
+        #bars > div .bar-inner.shaded::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.05);
+            border-top-left-radius: inherit;
+            border-top-right-radius: inherit;
+            border-bottom-left-radius: inherit;
+            border-bottom-right-radius: inherit;
+            pointer-events: none;
+        }
+
         /* Horizontale Nulllinie für negative Preise */
         #baseline {
             position: absolute;
@@ -919,6 +932,15 @@
                                 // Keine Texte in 15-Minuten-Balken
                                 // Abstände und Flex: bei aktivem Filter dynamisch pro Stunde, sonst Standard nach q
                                 const q = i % BarsPerHour; // 0..3
+                                // 15-Minuten: jeden zweiten Balken minimal dunkler überlagern (10% Schwarz)
+                                try {
+                                    if (BarsPerHour >= 4 && !noPrice) {
+                                        if ((q % 2) === 1) { fill.classList.add('shaded'); }
+                                        else { fill.classList.remove('shaded'); }
+                                    } else {
+                                        fill.classList.remove('shaded');
+                                    }
+                                } catch(e) { /* ignore */ }
                                 if (OnlyPriceBars) {
                                     // Nur Ränder an erstem/letztem sichtbaren Balken setzen, Breite über Standard lassen
                                     barindex.style.marginLeft = '0px';
