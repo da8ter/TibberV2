@@ -78,7 +78,8 @@
         }
 
         /* 15-Minuten: jeden zweiten Balken leicht abdunkeln (10% Schwarz-Overlay) */
-        #bars > div .bar-inner.shaded::after {
+        /* Nur bei Balken mit Preisinformationen anwenden */
+        #bars > div:not([data-nodata="1"]) .bar-inner.shaded::after {
             content: "";
             position: absolute;
             inset: 0;
@@ -849,11 +850,11 @@
                                             barindex.style.display = 'none';
                                             try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
                                         } else {
-                                            // Platzhalter: grauer Balken 70% hoch von unten
-                                            heightPct = 70;
+                                            // Platzhalter: grauer Balken volle Höhe von unten
+                                            heightPct = 100;
                                             fill.style.top = '';
                                             fill.style.bottom = '0';
-                                            fill.style.height = '70%';
+                                            fill.style.height = '100%';
                                             fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
                                             fill.style.borderTopRightRadius = 'var(--BorderRadius)';
                                             fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
