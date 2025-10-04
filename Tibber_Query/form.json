@@ -8,7 +8,7 @@
         {   "type": "CheckBox",
             "name": "DemoMode",
             "caption": "Demo mode (simulate 15-minute data)",
-            "visible": false
+            "visible": true
         },
         {   "type": "CheckBox",
         "name": "InstanceActive",
@@ -134,6 +134,12 @@
                         "digits": 0, 
                         "minimum": 0,
                         "maximum": 50.0
+                    },
+                    {   "type": "CheckBox",
+                        "name": "HTML_ColorGradientOptimization",
+                        "caption": "color gradient optimization",
+                        "visible": true,
+                        "onChange": "IPS_RequestAction($id, 'SetGradientOptimization', $HTML_ColorGradientOptimization);"
                     },
                     { 
                         "type": "Label", 

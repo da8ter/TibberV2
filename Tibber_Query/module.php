@@ -83,6 +83,9 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyInteger("HTML_BorderRadius", self::HTML_Default_PX);
 			$this->RegisterPropertyInteger("HTML_Scale", 0);
 
+			// Toggle for OKLCH gradient optimization in frontend
+			$this->RegisterPropertyBoolean("HTML_ColorGradientOptimization", false);
+
 			$this->RegisterPropertyInteger("HTML_BGCstartG", self::HTML_Color_Mint);
 			$this->RegisterPropertyInteger("HTML_BGCstopG", self::HTML_Color_Darkmint);
 			// Gradient-Farben für den aktuellen Balken
@@ -1269,6 +1272,11 @@ require_once __DIR__ . '/../libs/functions.php';
 				case "ShowDefaultFontColorHour":
 					$this->UpdateFormField("HTML_FontColorHourDefault", "visible", $Value);
 				break;
+				case "SetGradientOptimization":
+					// Forward toggle state to the tile visualization without forcing a full reload
+					$this->UpdateVisualizationValue(json_encode(['HTML_ColorGradientOptimization' => (bool)$Value]));
+					$this->SendDebug(__FUNCTION__, 'Forward HTML_ColorGradientOptimization='.json_encode((bool)$Value), 0);
+				break;
 				case "reload":
 					$this->Reload();
 				break;
@@ -1406,6 +1414,9 @@ require_once __DIR__ . '/../libs/functions.php';
 			$result['GradientCurrent']	= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG_Current")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG_Current"));
 			$result['MarkPriceLevel']	= $this->ReadPropertyBoolean("HTML_MarkPriceLevel");
 
+			// Forward optimization switch to HTML
+			$result['HTML_ColorGradientOptimization'] = $this->ReadPropertyBoolean("HTML_ColorGradientOptimization");
+
 			// Font sizes for Bars / Hours / Prices as CSS clamp triplets
 			$minB = $this->ReadPropertyInteger('HTML_FontSizeMinB');
 			$defB = $this->ReadPropertyInteger('HTML_FontSizeDefB');
@@ -1514,6 +1525,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_BGColorHour'=> self::HTML_Color_Grey,
 				'HTML_BorderRadius'=> self::HTML_Default_PX,
 		'HTML_Scale'=> 0,
+		'HTML_ColorGradientOptimization' => false,
 		'HTML_BGCstartG'=> self::HTML_Color_Mint,
 		'HTML_BGCstopG'=> self::HTML_Color_Darkmint,
 		'HTML_BGCstartG_Current'=> self::HTML_Color_Orange,

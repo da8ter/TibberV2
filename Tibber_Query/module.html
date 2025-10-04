@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        :root { --BorderRadius: 2px; --LeftGutter: 0px; --LineLeftOffset: 1px; --BottomGap: 12px; --BarsHoursGap: 8px; --ExtremeLabelGap: 10px; --GradientCurrent: linear-gradient(to top, #FF8000, #FF0000); --HoursH: 20px; --PricesH: 20px; --HoursPad: 0.25em; --TopPad: 2px; }
+        :root { --BorderRadius: 2px; --LeftGutter: 0px; --LineLeftOffset: 1px; --BottomGap: 12px; --BarsHoursGap: 8px; --ExtremeLabelGap: 10px; --GradientCurrent: linear-gradient(to top, #FF8000, #FF0000); --HoursH: 20px; --PricesH: 20px; --HoursPad: 0.25em; --TopPad: 2px; --GradientScale: 1; }
         body {
             overflow: hidden; /* verhindert Scrollbalken innerhalb der Kachel */
             color: var(--content-color, var(--font-color));
@@ -68,7 +68,7 @@
             /* Einheitliche Gradienten-Skalierung über die gesamte Balkenhöhe */
             background-repeat: no-repeat;
             background-position: left bottom;
-            background-size: 100% var(--BarsHeightPx, 100%);
+            background-size: 100% calc(var(--BarsHeightPx, 100%) * var(--GradientScale, 1));
             opacity: 1;
             z-index: 1;
         }
@@ -274,6 +274,11 @@
         let BarShowPrices = true; // Preise in den Balken
         let ShowGrid = true;      // Rasterlinien + Preislabels im Overlay
         let OnlyPriceBars = false; // nur Balken mit Preis-Info anzeigen
+        let OptimizeGradient = false; // OKLCH-Optimierung per Toggle
+        let LastGradientCsv = '';
+        let LastGradientCurrentCsv = '';
+        const DefaultGradientCsv = '#28cdab, #1d8b75';
+        const DefaultGradientCurrentCsv = '#FF8000, #FF0000';
         // Referenz auf :root für CSS-Variablen
         const root = document.documentElement;
         // Aktuellen Preis (aus Backend-Variable) puffern und bevorzugt anzeigen
@@ -295,6 +300,25 @@
         let lastHourHasData = [];
         // Zuletzt gerenderter Datensatz für spätere Neupositionierung
         let lastDataset = [];
+
+        // Helper: OKLCH-Gradient-Unterstützung prüfen und passenden String bauen
+        function supportsBgImage(val) {
+            try { return !!(window.CSS && CSS.supports && CSS.supports('background-image', val)); } catch(e) { return false; }
+        }
+        function buildGradientToTop(colorsCsv) {
+            // Erst OKLCH mit 'shorter hue' versuchen, dann ohne, am Ende sRGB-Fallback
+            const cands = [
+                'linear-gradient(in oklch shorter hue, to top, ' + colorsCsv + ')',
+                'linear-gradient(to top in oklch shorter hue, ' + colorsCsv + ')',
+                'linear-gradient(in oklch, to top, ' + colorsCsv + ')',
+                'linear-gradient(to top in oklch, ' + colorsCsv + ')'
+            ];
+            for (const g of cands) {
+                if (supportsBgImage(g)) return g;
+            }
+            // Fallback sRGB
+            return 'linear-gradient(to top,' + colorsCsv + ')';
+        }
 
         let bars = document.getElementById("bars");
         for(let i = 0; i < 96; i++) { // 24h * 4 Balken (Initial)
@@ -401,6 +425,23 @@
                         ShowGrid = !!data[parameter];
                         // Overlay neu berechnen
                         window.requestAnimationFrame(rebuildOverlay);
+                    break;
+                    case 'GradientOptimization':
+                    case 'ColorGradientOptimization':
+                    case 'HTML_ColorGradientOptimization':
+                        OptimizeGradient = !!data[parameter];
+                        // Neu anwenden: aktuelle oder Default-CSV erneut setzen
+                        try {
+                            const colorsCsv = LastGradientCsv || DefaultGradientCsv;
+                            const g = OptimizeGradient ? buildGradientToTop(colorsCsv) : ('linear-gradient(to top,' + colorsCsv + ')');
+                            root.style.setProperty('--Gradient', g);
+                        } catch(e) { /* ignore */ }
+                        try {
+                            const colorsCsvCur = LastGradientCurrentCsv || DefaultGradientCurrentCsv;
+                            const g2 = OptimizeGradient ? buildGradientToTop(colorsCsvCur) : ('linear-gradient(to top,' + colorsCsvCur + ')');
+                            root.style.setProperty('--GradientCurrent', g2);
+                        } catch(e) { /* ignore */ }
+                        try { repositionGradients(); } catch(e) { /* ignore */ }
                     break;
                     case 'only_price_bars':
                         OnlyPriceBars = !!data[parameter];
@@ -509,12 +550,26 @@
                             }
                     break; 
                     case 'Gradient':
-                        root.style.setProperty('--Gradient', 'linear-gradient(to top,'+data[parameter]+')');
-                        BarGradient = 'linear-gradient(to top,'+data[parameter]+')';
-                        console.log(BarGradient);
+                        try {
+                            const colorsCsv = String(data[parameter] || '');
+                            LastGradientCsv = colorsCsv;
+                            const g = OptimizeGradient ? buildGradientToTop(colorsCsv) : ('linear-gradient(to top,' + colorsCsv + ')');
+                            root.style.setProperty('--Gradient', g);
+                            BarGradient = g;
+                            console.log(g);
+                        } catch(e) {
+                            root.style.setProperty('--Gradient', 'linear-gradient(to top,'+data[parameter]+')');
+                        }
                     break;
                     case 'GradientCurrent':
-                        root.style.setProperty('--GradientCurrent', 'linear-gradient(to top,'+data[parameter]+')');
+                        try {
+                            const colorsCsv = String(data[parameter] || '');
+                            LastGradientCurrentCsv = colorsCsv;
+                            const g2 = OptimizeGradient ? buildGradientToTop(colorsCsv) : ('linear-gradient(to top,' + colorsCsv + ')');
+                            root.style.setProperty('--GradientCurrent', g2);
+                        } catch(e) {
+                            root.style.setProperty('--GradientCurrent', 'linear-gradient(to top,'+data[parameter]+')');
+                        }
                     break;
                     case 'MarkPriceLevel':
                         MarkPriceLevel = data[parameter];
@@ -673,6 +728,39 @@
                            t = Math.max(0, Math.min(1, t));
                            return 100 * (1 - t); // 0% = oben, 100% = unten
                        }
+                       
+                       // Gradienten-Skalierung basierend auf höchstem sichtbaren Preislevel
+                       try {
+                           const levelRank = (lvl) => {
+                               switch (lvl) {
+                                   case 'VERY_CHEAP': return 0;
+                                   case 'CHEAP': return 1;
+                                   case 'NORMAL': return 2;
+                                   case 'EXPENSIVE': return 3;
+                                   case 'VERY_EXPENSIVE': return 4;
+                                   default: return -1;
+                               }
+                           };
+                           let maxLevelRankVisible = -1;
+                           for (let i = 0; i < expectedBars; i++) {
+                               const row = dataset[i];
+                               if (!row) continue;
+                               const pNum = (row && typeof row.price === 'number') ? row.price : NaN;
+                               const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
+                               const baseNoData = !isFinite(pNum) || (row && row.nodata === true);
+                               const noPrice = baseNoData || (pNum === 0 && !hasLevel);
+                               if (noPrice) continue;
+                               const r = levelRank(row.level);
+                               if (r > maxLevelRankVisible) maxLevelRankVisible = r;
+                           }
+                           let visibleFraction = 1.0; // Anteil des Verlaufs, der innerhalb des Balkens sichtbar sein soll
+                           if (maxLevelRankVisible >= 0) {
+                               // Linear von 10% (VERY_CHEAP) bis 100% (VERY_EXPENSIVE)
+                               visibleFraction = 0.1 + (maxLevelRankVisible / 4) * 0.9;
+                           }
+                           const gradientScale = 1 / Math.max(0.1, Math.min(1.0, visibleFraction));
+                           root.style.setProperty('--GradientScale', String(gradientScale));
+                       } catch(e) { /* ignore */ }
                        
 
                        // pro Stunde prüfen, ob mindestens ein gültiger Preis vorhanden ist
@@ -860,7 +948,13 @@
                                             fill.style.borderBottomLeftRadius = 'var(--BorderRadius)';
                                             fill.style.borderBottomRightRadius = 'var(--BorderRadius)';
                                             fill.style.opacity = '1';
-                                            fill.style.backgroundImage = 'linear-gradient(to top, rgba(128,128,128,0.3), rgba(128,128,128,0))';
+                                            try {
+                                                const phCsv = 'rgba(128,128,128,0.3), rgba(128,128,128,0)';
+                                                const phGrad = OptimizeGradient ? buildGradientToTop(phCsv) : ('linear-gradient(to top, ' + phCsv + ')');
+                                                fill.style.backgroundImage = phGrad;
+                                            } catch(e) {
+                                                fill.style.backgroundImage = 'linear-gradient(to top, rgba(128,128,128,0.3), rgba(128,128,128,0))';
+                                            }
                                             try { barindex.setAttribute('data-nodata', '1'); } catch(e) { /* ignore */ }
                                         }
                                     } else if (viewMin >= 0) {
@@ -871,12 +965,8 @@
                                         fill.style.top = '';
                                         fill.style.bottom = '0';
                                         fill.style.height = Math.max(0, Math.min(100, heightPct)) + '%';
-                                        // Gradient global an Container ausrichten: Unterkante = globales Minimum
-                                        try {
-                                            const topPct = 100 - heightPct; // Top des Füllbalkens in % vom Container-Top
-                                            const bgPosY = - (barsHeightPx * topPct / 100);
-                                            fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
-                                        } catch(e) { /* ignore */ }
+                                        // Gradient immer am unteren Rand verankern, damit nur der untere Anteil sichtbar bleibt
+                                        try { fill.style.backgroundPosition = 'left bottom'; } catch(e) { /* ignore */ }
                                         fill.style.borderTopLeftRadius = 'var(--BorderRadius)';
                                         fill.style.borderTopRightRadius = 'var(--BorderRadius)';
                                         fill.style.borderBottomLeftRadius = '0px';
@@ -1274,11 +1364,8 @@
                     if (noPrice) continue;
                     let bgPosY = 0;
                     if (viewMin >= 0) {
-                        const denom = (viewMax - viewMin) || 1;
-                        const frac = Math.max(0, Math.min(1, (pNum - viewMin) / denom));
-                        const heightPct = frac * 100;
-                        const topPct = 100 - heightPct;
-                        bgPosY = - (H * topPct / 100);
+                        // Bei rein positiven Bereichen den Verlauf am unteren Rand verankern
+                        fill.style.backgroundPosition = 'left bottom';
                     } else {
                         const yP = yPctFor(pNum);
                         if (pNum >= 0) {
@@ -1290,7 +1377,9 @@
                             bgPosY = - (H * topPct / 100);
                         }
                     }
-                    fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                    if (viewMin < 0) {
+                        fill.style.backgroundPosition = '0px ' + bgPosY + 'px';
+                    }
                 }
             } catch(e) { /* ignore */ }
         }

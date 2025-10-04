@@ -93,6 +93,7 @@
             "default Fontcolor hour":"eigene Schriftfarbe für Stunden",
             "Enable 15-minute granularity for energy optimizer variable":"15-Minuten-Preise in Optimierer-Variable ausgeben",
             "Enable 15-minute prices":"15-Minuten-Preise aktivieren",
+            "color gradient optimization": "Farbverlauf Optimierung",
             "start gradient (current bar)": "Start Farbe (aktueller Balken)",
             "stop gradient (current bar)": "Ende Farbe (aktueller Balken)",
             "Price - create variables per 15 minutes (96 for current day & 96 for day ahead day)":"Preis - Variablen je 15 Minuten anlegen (96 für aktuellen Tag & 96 für die Preisvorschau)"
