@@ -275,6 +275,7 @@
         let ShowGrid = true;      // Rasterlinien + Preislabels im Overlay
         let OnlyPriceBars = false; // nur Balken mit Preis-Info anzeigen
         let OptimizeGradient = false; // OKLCH-Optimierung per Toggle
+        let ScaleGradientByLevel = true; // Verlaufsskalierung per Preislevel
         let LastGradientCsv = '';
         let LastGradientCurrentCsv = '';
         const DefaultGradientCsv = '#28cdab, #1d8b75';
@@ -305,6 +306,93 @@
         function supportsBgImage(val) {
             try { return !!(window.CSS && CSS.supports && CSS.supports('background-image', val)); } catch(e) { return false; }
         }
+        // JS-Fallback: Interpolation in OKLCH im Script und Ausgabe als sRGB-Mehrfachstops
+        function buildPerceptualGradientCsv(colorsCsv, steps = 9) {
+            try {
+                const parts = String(colorsCsv).split(',').map(s => s.trim()).filter(Boolean);
+                if (parts.length < 2) return '';
+                // Unterstütze nur einfache Hex-Farben (#RRGGBB) als Fallback-Eingabe
+                const hexRe = /^#?([0-9a-fA-F]{6})$/;
+                const hexToRgb = (hex) => {
+                    const m = hexRe.exec(hex);
+                    if (!m) return null;
+                    const n = parseInt(m[1], 16);
+                    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+                };
+                const srgbToLinear = (c) => {
+                    c = c / 255;
+                    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+                };
+                const linearToSrgb = (c) => {
+                    return c <= 0.0031308 ? (12.92 * c) : (1.055 * Math.pow(c, 1/2.4) - 0.055);
+                };
+                const rgbToOklab = (r8,g8,b8) => {
+                    const r = srgbToLinear(r8);
+                    const g = srgbToLinear(g8);
+                    const b = srgbToLinear(b8);
+                    const l = 0.4122214708*r + 0.5363325363*g + 0.0514459929*b;
+                    const m = 0.2119034982*r + 0.6806995451*g + 0.1073969566*b;
+                    const s = 0.0883024619*r + 0.2817188376*g + 0.6299787005*b;
+                    const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+                    const L = 0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_;
+                    const a = 1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_;
+                    const bb= 0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_;
+                    return {L, a, b: bb};
+                };
+                const oklabToRgb = (L,a,b) => {
+                    const l_ = L + 0.3963377774*a + 0.2158037573*b;
+                    const m_ = L - 0.1055613458*a - 0.0638541728*b;
+                    const s_ = L - 0.0894841775*a - 1.2914855480*b;
+                    const l = l_*l_*l_;
+                    const m = m_*m_*m_;
+                    const s = s_*s_*s_;
+                    let r =  4.0767416621*l - 3.3077115913*m + 0.2309699292*s;
+                    let g = -1.2684380046*l + 2.6097574011*m - 0.3413193965*s;
+                    let bb= -0.0041960863*l - 0.7034186147*m + 1.7076147010*s;
+                    r = Math.min(1, Math.max(0, r));
+                    g = Math.min(1, Math.max(0, g));
+                    bb= Math.min(1, Math.max(0, bb));
+                    const R = Math.round(Math.min(255, Math.max(0, linearToSrgb(r)*255)));
+                    const G = Math.round(Math.min(255, Math.max(0, linearToSrgb(g)*255)));
+                    const B = Math.round(Math.min(255, Math.max(0, linearToSrgb(bb)*255)));
+                    return {R,G,B};
+                };
+                const toOklch = ({L,a,b}) => {
+                    const C = Math.hypot(a,b);
+                    let h = Math.atan2(b, a) * 180 / Math.PI;
+                    if (h < 0) h += 360;
+                    return {L, C, h};
+                };
+                const fromOklch = ({L,C,h}) => {
+                    const hr = (h * Math.PI) / 180;
+                    const a = C * Math.cos(hr);
+                    const b = C * Math.sin(hr);
+                    return {L, a, b};
+                };
+                const fmtHex = ({R,G,B}) => '#' + [R,G,B].map(v=>v.toString(16).padStart(2,'0')).join('');
+                const parseStops = parts.map(p => hexToRgb(p)).filter(Boolean);
+                if (parseStops.length !== parts.length) return '';
+                const oklchStops = parseStops.map(rgb => toOklch(rgbToOklab(rgb.r, rgb.g, rgb.b)));
+                const segs = oklchStops.length - 1;
+                const out = [];
+                for (let s = 0; s < segs; s++) {
+                    const a0 = oklchStops[s];
+                    const a1 = oklchStops[s+1];
+                    // kürzere Hue-Richtung
+                    let dh = ((a1.h - a0.h + 540) % 360) - 180;
+                    for (let i = 0; i < steps; i++) {
+                        const t = i / (steps - 1);
+                        const L = a0.L + t*(a1.L - a0.L);
+                        const C = a0.C + t*(a1.C - a0.C);
+                        let h = a0.h + t*dh; if (h < 0) h += 360; else if (h >= 360) h -= 360;
+                        const rgb = oklabToRgb(...Object.values(fromOklch({L,C,h})));
+                        const pos = ((s + t) / segs) * 100;
+                        out.push(fmtHex(rgb) + ' ' + pos.toFixed(2) + '%');
+                    }
+                }
+                return out.join(', ');
+            } catch(e) { return ''; }
+        }
         function buildGradientToTop(colorsCsv) {
             // Erst OKLCH mit 'shorter hue' versuchen, dann ohne, am Ende sRGB-Fallback
             const cands = [
@@ -316,7 +404,10 @@
             for (const g of cands) {
                 if (supportsBgImage(g)) return g;
             }
-            // Fallback sRGB
+            // Kein CSS-OKLCH: Versuche JS-Fallback mit OKLCH-Interpolation -> sRGB-Mehrfachstops
+            const csv = buildPerceptualGradientCsv(colorsCsv, 9);
+            if (csv) return 'linear-gradient(to top, ' + csv + ')';
+            // Fallback sRGB einfach
             return 'linear-gradient(to top,' + colorsCsv + ')';
         }
 
@@ -440,6 +531,52 @@
                             const colorsCsvCur = LastGradientCurrentCsv || DefaultGradientCurrentCsv;
                             const g2 = OptimizeGradient ? buildGradientToTop(colorsCsvCur) : ('linear-gradient(to top,' + colorsCsvCur + ')');
                             root.style.setProperty('--GradientCurrent', g2);
+                        } catch(e) { /* ignore */ }
+                        try { repositionGradients(); } catch(e) { /* ignore */ }
+                    break;
+                    case 'GradientScaleByLevel':
+                    case 'ScaleGradientByLevel':
+                    case 'HTML_GradientScaleByLevel':
+                        ScaleGradientByLevel = !!data[parameter];
+                        // sofort aktualisieren
+                        try {
+                            if (!ScaleGradientByLevel) {
+                                root.style.setProperty('--GradientScale', '1');
+                            } else {
+                                // Rechne die Skalierung anhand des aktuell sichtbaren höchsten Preislevels neu
+                                const dataset = Array.isArray(lastDataset) ? lastDataset : [];
+                                const hoursN = (typeof lastHoursToShow === 'number' && lastHoursToShow > 0) ? lastHoursToShow : 24;
+                                const bph    = (typeof lastBarsPerHour === 'number' && lastBarsPerHour > 0) ? lastBarsPerHour : 4;
+                                const expectedBars = Math.min(dataset.length, hoursN * bph);
+                                const levelRank = (lvl) => {
+                                    switch (lvl) {
+                                        case 'VERY_CHEAP': return 0;
+                                        case 'CHEAP': return 1;
+                                        case 'NORMAL': return 2;
+                                        case 'EXPENSIVE': return 3;
+                                        case 'VERY_EXPENSIVE': return 4;
+                                        default: return -1;
+                                    }
+                                };
+                                let maxLevelRankVisible = -1;
+                                for (let i = 0; i < expectedBars; i++) {
+                                    const row = dataset[i];
+                                    if (!row) continue;
+                                    const pNum = (row && typeof row.price === 'number') ? row.price : NaN;
+                                    const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
+                                    const baseNoData = !isFinite(pNum) || (row && row.nodata === true);
+                                    const noPrice = baseNoData || (pNum === 0 && !hasLevel);
+                                    if (noPrice) continue;
+                                    const r = levelRank(row.level);
+                                    if (r > maxLevelRankVisible) maxLevelRankVisible = r;
+                                }
+                                let visibleFraction = 1.0;
+                                if (maxLevelRankVisible >= 0) {
+                                    visibleFraction = 0.1 + (maxLevelRankVisible / 4) * 0.9;
+                                }
+                                const gradientScale = 1 / Math.max(0.1, Math.min(1.0, visibleFraction));
+                                root.style.setProperty('--GradientScale', String(gradientScale));
+                            }
                         } catch(e) { /* ignore */ }
                         try { repositionGradients(); } catch(e) { /* ignore */ }
                     break;
@@ -729,37 +866,41 @@
                            return 100 * (1 - t); // 0% = oben, 100% = unten
                        }
                        
-                       // Gradienten-Skalierung basierend auf höchstem sichtbaren Preislevel
+                       // Gradienten-Skalierung basierend auf höchstem sichtbaren Preislevel (per Toggle)
                        try {
-                           const levelRank = (lvl) => {
-                               switch (lvl) {
-                                   case 'VERY_CHEAP': return 0;
-                                   case 'CHEAP': return 1;
-                                   case 'NORMAL': return 2;
-                                   case 'EXPENSIVE': return 3;
-                                   case 'VERY_EXPENSIVE': return 4;
-                                   default: return -1;
+                           if (ScaleGradientByLevel) {
+                               const levelRank = (lvl) => {
+                                   switch (lvl) {
+                                       case 'VERY_CHEAP': return 0;
+                                       case 'CHEAP': return 1;
+                                       case 'NORMAL': return 2;
+                                       case 'EXPENSIVE': return 3;
+                                       case 'VERY_EXPENSIVE': return 4;
+                                       default: return -1;
+                                   }
+                               };
+                               let maxLevelRankVisible = -1;
+                               for (let i = 0; i < expectedBars; i++) {
+                                   const row = dataset[i];
+                                   if (!row) continue;
+                                   const pNum = (row && typeof row.price === 'number') ? row.price : NaN;
+                                   const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
+                                   const baseNoData = !isFinite(pNum) || (row && row.nodata === true);
+                                   const noPrice = baseNoData || (pNum === 0 && !hasLevel);
+                                   if (noPrice) continue;
+                                   const r = levelRank(row.level);
+                                   if (r > maxLevelRankVisible) maxLevelRankVisible = r;
                                }
-                           };
-                           let maxLevelRankVisible = -1;
-                           for (let i = 0; i < expectedBars; i++) {
-                               const row = dataset[i];
-                               if (!row) continue;
-                               const pNum = (row && typeof row.price === 'number') ? row.price : NaN;
-                               const hasLevel = !!(row && typeof row.level === 'string' && row.level !== '');
-                               const baseNoData = !isFinite(pNum) || (row && row.nodata === true);
-                               const noPrice = baseNoData || (pNum === 0 && !hasLevel);
-                               if (noPrice) continue;
-                               const r = levelRank(row.level);
-                               if (r > maxLevelRankVisible) maxLevelRankVisible = r;
+                               let visibleFraction = 1.0; // Anteil des Verlaufs, der innerhalb des Balkens sichtbar sein soll
+                               if (maxLevelRankVisible >= 0) {
+                                   // Linear von 10% (VERY_CHEAP) bis 100% (VERY_EXPENSIVE)
+                                   visibleFraction = 0.1 + (maxLevelRankVisible / 4) * 0.9;
+                               }
+                               const gradientScale = 1 / Math.max(0.1, Math.min(1.0, visibleFraction));
+                               root.style.setProperty('--GradientScale', String(gradientScale));
+                           } else {
+                               root.style.setProperty('--GradientScale', '1');
                            }
-                           let visibleFraction = 1.0; // Anteil des Verlaufs, der innerhalb des Balkens sichtbar sein soll
-                           if (maxLevelRankVisible >= 0) {
-                               // Linear von 10% (VERY_CHEAP) bis 100% (VERY_EXPENSIVE)
-                               visibleFraction = 0.1 + (maxLevelRankVisible / 4) * 0.9;
-                           }
-                           const gradientScale = 1 / Math.max(0.1, Math.min(1.0, visibleFraction));
-                           root.style.setProperty('--GradientScale', String(gradientScale));
                        } catch(e) { /* ignore */ }
                        
 

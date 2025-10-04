@@ -83,6 +83,9 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyInteger("HTML_BorderRadius", self::HTML_Default_PX);
 			$this->RegisterPropertyInteger("HTML_Scale", 0);
 
+			// Toggle for gradient scaling by price level
+			$this->RegisterPropertyBoolean("HTML_GradientScaleByLevel", true);
+
 			// Toggle for OKLCH gradient optimization in frontend
 			$this->RegisterPropertyBoolean("HTML_ColorGradientOptimization", false);
 
@@ -1277,6 +1280,11 @@ require_once __DIR__ . '/../libs/functions.php';
 					$this->UpdateVisualizationValue(json_encode(['HTML_ColorGradientOptimization' => (bool)$Value]));
 					$this->SendDebug(__FUNCTION__, 'Forward HTML_ColorGradientOptimization='.json_encode((bool)$Value), 0);
 				break;
+				case "SetGradientScaleByLevel":
+					// Forward scaling-by-level toggle to the tile
+					$this->UpdateVisualizationValue(json_encode(['HTML_GradientScaleByLevel' => (bool)$Value]));
+					$this->SendDebug(__FUNCTION__, 'Forward HTML_GradientScaleByLevel='.json_encode((bool)$Value), 0);
+				break;
 				case "reload":
 					$this->Reload();
 				break;
@@ -1350,6 +1358,22 @@ require_once __DIR__ . '/../libs/functions.php';
 			return $this->ReadAttributeString('Price_Array');
 		}
 
+		/**
+		 * Returns the raw 15-minute price array as a JSON string.
+		 * Structure per entry: { start: epoch_sec, end: epoch_sec, Price: cent, Level: 'VERY_CHEAP'|'CHEAP'|'NORMAL'|'EXPENSIVE'|'VERY_EXPENSIVE' }
+		 *
+		 * @param bool $fallbackHourly If true and no 15-minute data is available, returns the hourly array instead; otherwise returns an empty string.
+		 * @return string JSON-encoded array or empty string when not available.
+		 */
+		public function PriceArray15m(bool $fallbackHourly = false)
+		{
+			$raw = $this->ReadAttributeString('Price_Array_15m');
+			if (!empty($raw)) {
+				return $raw;
+			}
+			return $fallbackHourly ? $this->ReadAttributeString('Price_Array') : '';
+		}
+
 		public function GetVisualizationTile()
         {
 			$initialHandling = '<script>handleMessage(' . json_encode($this->GetFullUpdateMessage()) . ')</script>';
@@ -1413,6 +1437,9 @@ require_once __DIR__ . '/../libs/functions.php';
 			$result['Gradient']			= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG"));
 			$result['GradientCurrent']	= "#".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstartG_Current")).", #".sprintf('%06X', $this->ReadPropertyInteger("HTML_BGCstopG_Current"));
 			$result['MarkPriceLevel']	= $this->ReadPropertyBoolean("HTML_MarkPriceLevel");
+
+			// Forward scaling-by-level switch to HTML
+			$result['HTML_GradientScaleByLevel'] = $this->ReadPropertyBoolean("HTML_GradientScaleByLevel");
 
 			// Forward optimization switch to HTML
 			$result['HTML_ColorGradientOptimization'] = $this->ReadPropertyBoolean("HTML_ColorGradientOptimization");
@@ -1525,6 +1552,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				'HTML_BGColorHour'=> self::HTML_Color_Grey,
 				'HTML_BorderRadius'=> self::HTML_Default_PX,
 		'HTML_Scale'=> 0,
+		'HTML_GradientScaleByLevel' => true,
 		'HTML_ColorGradientOptimization' => false,
 		'HTML_BGCstartG'=> self::HTML_Color_Mint,
 		'HTML_BGCstopG'=> self::HTML_Color_Darkmint,

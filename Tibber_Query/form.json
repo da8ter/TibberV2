@@ -141,6 +141,12 @@
                         "visible": true,
                         "onChange": "IPS_RequestAction($id, 'SetGradientOptimization', $HTML_ColorGradientOptimization);"
                     },
+                    {   "type": "CheckBox",
+                        "name": "HTML_GradientScaleByLevel",
+                        "caption": "scale gradient by price level",
+                        "visible": true,
+                        "onChange": "IPS_RequestAction($id, 'SetGradientScaleByLevel', $HTML_GradientScaleByLevel);"
+                    },
                     { 
                         "type": "Label", 
                         "caption": "gradient for the bars" 
