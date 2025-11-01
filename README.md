@@ -1,9 +1,4 @@
 ### IP-Symcon Modul Library: Tibber V.2 
- 
-Diese Modul wurde von Philipp Hirzel entwickelt aufgrund von Zeitmangel aber leider nicht veröffentlicht. Dankenswerterweise durfte ich das Modul übernehmen und der Symcon Community zur Verfügung stellen. Bei Fragen oder Wünschem gerne Meldung an mich.
-  
-Die Nutzung des Moduls geschieht auf eigene Gefahr ohne Gewähr. Es handelt sich hierbei um einen frühen Entwicklungsstand.
-
 ## Dokumentation
 
 **Inhaltsverzeichnis**
@@ -67,4 +62,5 @@ Dieses Modul unterstützt die Anzeige und Weitergabe von 15-Minuten-Preisen (4 B
   - „Preis - Variablen pro Stunde anlegen (24 für aktuellen Tag & 24 für die Preisvorschau)“
   - „Preis - Variablen je 15 Minuten anlegen (96 für aktuellen Tag & 96 für die Preisvorschau)“
 
-  
+   
+Vielen Dank an Philipp Hirzel und Kristian Lorbetzki die dieses Modul ursprünglich entwickelt haben!
