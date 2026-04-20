@@ -51,6 +51,12 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterAttributeString("Price_Array", '');
 			$this->RegisterAttributeInteger("ar_handler", 0);
 			$this->RegisterAttributeBoolean("EEX_Received", false);
+			// API-Ratelimit/Backoff
+			$this->RegisterAttributeInteger("PriceRetryCount", 0);
+			$this->RegisterAttributeInteger("ApiRetryAfter", 0);
+			// Cache für Realtime-Check (Timestamp des letzten Aufrufs)
+			$this->RegisterAttributeInteger("RT_CheckedAt", 0);
+			$this->RegisterAttributeBoolean("RT_EnabledCached", false);
 			$this->RegisterAttributeString('AVGPrice', '');
 			$this->RegisterAttributeString('Ahead_Price_Data', '');
 			// holds raw quarter-hourly price entries from API when available
@@ -175,11 +181,21 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->SendDebug('GraphQL_Query', $query, 0);
 			$request = json_encode([ 'query' => $query ]);
 			$result = $this->CallTibber($request);
-			if (!$result) return;		//Bei Fehler abbrechen
+			if (!$result) {
+				// Fehler: Retry-Counter hoch und Timer mit Backoff setzen, sonst läuft ggf. der alte kurze Intervall weiter
+				$this->WriteAttributeInteger('PriceRetryCount', $this->ReadAttributeInteger('PriceRetryCount') + 1);
+				$this->SetUpdateTimerPrices(true);
+				return;
+			}
 
 			$this->SendDebug("Price_Result", $result, 0);
 
 			$this->ProcessPriceData($result);
+			// Counter nur zurücksetzen, wenn T1-Preise wirklich geliefert wurden.
+			// Ansonsten zählt SetUpdateTimerPrices() die 5-Minuten-Polls bis zum Cap.
+			if ($this->ReadAttributeBoolean('EEX_Received')) {
+				$this->WriteAttributeInteger('PriceRetryCount', 0);
+			}
 			$this->SetUpdateTimerPrices();
 			$this->Statistics(json_decode($this->PriceArray(), true));
 			$this->Update_Ahead_Price_Data();
@@ -240,8 +256,12 @@ require_once __DIR__ . '/../libs/functions.php';
 
 		public function SetActualPrice(){
 			date_default_timezone_set('Europe/Berlin');
+			// Hinweis: Es wird hier bewusst KEIN GetPriceData() Fallback mehr ausgelöst,
+			// damit der Timer nicht ungewollt zusätzliche API-Calls verursacht.
+			// Ist das Price_Array leer, setzen wir nur den nächsten Timer und kehren zurück.
 			if ($this->ReadAttributeString("Price_Array") == ''){
-				$this->GetPriceData();
+				$this->SetUpdateTimerActualPrice();
+				return;
 			}
 			if ($this->ReadAttributeString("Price_Array") != ''){
 				$prices = json_decode($this->ReadAttributeString("Price_Array"),true);
@@ -948,22 +968,55 @@ require_once __DIR__ . '/../libs/functions.php';
 			}
 		}
 
-		private function SetUpdateTimerPrices()
+		private function SetUpdateTimerPrices(bool $failure = false)
 		{
 			date_default_timezone_set('Europe/Berlin');
-			$h = date('G');
-			if ($h <13){
-				$time_new = mktime(13, 0, 0, intval( date("m") ) , intval(date("d")), intval(date("Y")));
+			$now = time();
+
+			// 1) API-Ratelimit aktiv? -> nach Ablauf des Ban-Fensters versuchen (+5s Puffer)
+			$apiRetryAfter = $this->ReadAttributeInteger('ApiRetryAfter');
+			if ($apiRetryAfter && $now < $apiRetryAfter) {
+				$time_new = $apiRetryAfter + 5;
 			}
-			else{
-				if (!$this->ReadAttributeBoolean('EEX_Received')){
-					$time_new = time() + 300;								// Alle 5 Minuten abholen bis T1 Wert geliefert wird.
+			// 2) Letzter Call war Fehler -> exponentielles Backoff (5, 10, 20, 40, 60, 60, ...) Minuten,
+			//    hartes Cap: spätestens am nächsten Tag 00:00:05
+			elseif ($failure) {
+				$retries = max(1, $this->ReadAttributeInteger('PriceRetryCount'));
+				$backoffMin = min(60, 5 * pow(2, $retries - 1));	// 5,10,20,40,60,60,...
+				$candidate = $now + intval($backoffMin) * 60;
+				$nextDay = mktime(0, 0, 5, intval(date("m")), intval(date("d") + 1), intval(date("Y")));
+				$time_new = min($candidate, $nextDay);
+				$this->SendDebug(__FUNCTION__, 'backoff after '.$retries.' retries: '.$backoffMin.' min', 0);
+			}
+			else {
+				$h = intval(date('G'));
+				$y = intval(date('Y'));
+				$m = intval(date('m'));
+				$d = intval(date('d'));
+				if ($h < 13){
+					// Erster Versuch um 13:00 Uhr
+					$time_new = mktime(13, 0, 0, $m, $d, $y);
 				}
 				else{
-					$time_new = mktime(0, 0, 5, intval( date("m") ) , intval(date("d") + 1), intval(date("Y")));
+					if (!$this->ReadAttributeBoolean('EEX_Received')){
+						// T1-Preise fehlen -> stündlich neu versuchen bis 18:00, danach nächster Tag
+						if ($h < 18) {
+							$time_new = mktime($h + 1, 0, 5, $m, $d, $y);
+							$this->SendDebug(__FUNCTION__, 'T1 missing -> retry next hour', 0);
+						} else {
+							$time_new = mktime(0, 0, 5, $m, $d + 1, $y);
+							$this->SendDebug(__FUNCTION__, 'T1 still missing after 18:00 -> skip to next day', 0);
+						}
+					}
+					else{
+						$time_new = mktime(0, 0, 5, $m, $d + 1, $y);
+					}
 				}
 			}
-			$timer_new = $time_new - time();
+			// Sicherheitsnetz: nie schneller als in 60s erneut feuern
+			if ($time_new - $now < 60) { $time_new = $now + 60; }
+
+			$timer_new = $time_new - $now;
 			if ($this->ReadPropertyBoolean("InstanceActive"))
 			{
 				$this->SetTimerInterval("UpdateTimerPrice", $timer_new * 1000);

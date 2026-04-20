@@ -18,7 +18,18 @@ Mit diesem Modul können die Informationen abgerufen werden welche von der Tibbe
 * Preisvorschau als Chart und als HMML Kachel in der Kachelvisualisierung
 * Variablen pro Stunden und/oder 15-Minuten anlegen für den heutigen und morgigen Tag
 * Array zur Verwendung in eigene Anwendungen und Scripten.
- 
+
+### API-Aufrufverhalten / Ratelimit-Schutz
+
+Das Modul ruft die Tibber GraphQL API nur ereignisgesteuert auf:
+
+* **Preisdaten (`priceInfo`)**: 1× pro Tag um 13:00 Uhr (sobald Day-Ahead verfügbar). Fehlen die Preise für morgen, wird **stündlich bis maximal 18:00 Uhr** erneut abgefragt, danach pausiert das Modul bis zum nächsten Tag 00:00 Uhr, um ein Tibber-Ratelimit zu vermeiden.
+* **Aktueller Preis**: Timer-basiert (stündlich bzw. viertelstündlich) — **ohne API-Call**, lokal aus dem Cache.
+* **Realtime-Verfügbarkeit**: maximal 1× pro 24 Stunden (Cache).
+* **Home-Liste und Verbrauch**: nur manuell über die PHP-Befehle.
+
+Bei HTTP 429 (Too many requests) oder 5xx Server-Fehlern wird der `Retry-After`-Header ausgewertet und für die Dauer des Ban-Fensters jegliche API-Kommunikation ausgesetzt. Nach weiteren Fehlschlägen greift ein exponentielles Backoff (5, 10, 20, 40, 60 Min), maximal bis zum nächsten Tag.
+
 ### 2. Voraussetzungen
 
 - Symcon ab Version 7.1

@@ -23,6 +23,10 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterAttributeBoolean('RT_enabled', false);
 			$this->RegisterAttributeInteger('Parent_IO', 0);
 			$this->RegisterAttributeInteger('WTCounter', 0);
+			// Von TibberHelper (CallTibber/CheckRealtimeAvailable) genutzte Attribute
+			$this->RegisterAttributeInteger('ApiRetryAfter', 0);
+			$this->RegisterAttributeInteger('RT_CheckedAt', 0);
+			$this->RegisterAttributeBoolean('RT_EnabledCached', false);
 
 			// Initale Configuration			
 			$Variables = [];
@@ -100,25 +104,37 @@ require_once __DIR__ . '/../libs/functions.php';
 		public function GetConfigurationForm()
 		{
 			$jsonform = json_decode(file_get_contents(__DIR__."/form.json"), true);
-			$this->SendDebug(__FUNCTION__,json_encode($jsonform),0);
+			$this->SendDebug(__FUNCTION__, json_encode($jsonform), 0);
+
+			// Falls das Form nicht geparst werden kann, Rohinhalt oder leeres Objekt zurückgeben
+			if (!is_array($jsonform)) {
+				$raw = @file_get_contents(__DIR__."/form.json");
+				return is_string($raw) && $raw !== '' ? $raw : json_encode([]);
+			}
 
 			$value[] = ["caption"=> "Select Home", "value"=> "0" ];
-			$result=$this->ReadAttributeString("Homes");
-			$this->SendDebug(__FUNCTION__.' Read Attribute', json_encode($result),0)	;
-			if ($result == '') return;
+			$result = $this->ReadAttributeString("Homes");
+			$this->SendDebug(__FUNCTION__.' Read Attribute', json_encode($result), 0);
+			if ($result == '') {
+				// Kein Cache (z.B. kein Internet beim Start) -> Basiskonfiguration anzeigen
+				return json_encode($jsonform);
+			}
+
 			$homes = json_decode($result, true);
-			foreach ($homes["data"]["viewer"]["homes"] as $key => $home){
-				if (empty($home["appNickname"]) )
-					{	
-						$caption = $home['address']['address1']; 
-					}
-					else
-					{
-						$caption = $home["appNickname"];
-					}
+			if (!is_array($homes) || !isset($homes['data']['viewer']['homes']) || !is_array($homes['data']['viewer']['homes'])) {
+				// Unerwartete Struktur -> Basiskonfiguration
+				return json_encode($jsonform);
+			}
+
+			foreach ($homes["data"]["viewer"]["homes"] as $key => $home) {
+				if (empty($home["appNickname"])) {
+					$caption = $home['address']['address1'];
+				} else {
+					$caption = $home["appNickname"];
+				}
 				$value[] = ["caption"=> $caption, "value"=> $home["id"] ];
 			}
-			$this->SendDebug(__FUNCTION__.' Write Values for Home', json_encode($value),0)	;
+			$this->SendDebug(__FUNCTION__.' Write Values for Home', json_encode($value), 0);
 
 			// create Values for List dynamically
 			$ListValues = [];
@@ -126,7 +142,7 @@ require_once __DIR__ . '/../libs/functions.php';
 				$Pos          	= $Variable[0];
 				$Ident        	= str_replace(' ', '', $Variable[1]);
 				$Name         	= $Variable[1];
-				$Tag		   	= $Variable[2];
+				$Tag	   	= $Variable[2];
 				$VarType      	= $Variable[3];
 				$Profile      	= $Variable[4];
 				$Factor       	= $Variable[5];
@@ -134,18 +150,23 @@ require_once __DIR__ . '/../libs/functions.php';
 				$Keep         	= $Variable[7];
 
 				$ListValues[] = ["Pos"=>"$Pos", "Ident"=>"$Ident", "Name"=>"$Name", "Tag"=>"$Tag", "VarType"=>"$VarType", "Profile"=>"$Profile", "Factor"=>"$Factor", "Action"=>"$Action", "Keep"=>"$Keep" ];
+			}
+			$this->SendDebug(__FUNCTION__.' Write Values for List', json_encode($ListValues), 0);
 
-			}	
-				$this->SendDebug(__FUNCTION__.' Write Values for List', json_encode($ListValues),0)	;
-
+			// Nur wenn erwartete Elemente existieren, diese befüllen
+			if (isset($jsonform["elements"][2]['items'][0])) {
 				$jsonform["elements"][2]['items'][0]["options"] = $value;
 				$jsonform["elements"][2]['items'][0]["visible"] = true;
+			}
+			if (isset($jsonform["elements"][3])) {
 				$jsonform["elements"][3]['values'] = $ListValues;
+			}
 
-				if ($this->ReadPropertyString("Token") && $this->ReadPropertyString("Home_ID") )
-				{
+			if ($this->ReadPropertyString("Token") && $this->ReadPropertyString("Home_ID")) {
+				if (isset($jsonform["elements"][0])) {
 					$jsonform["elements"][0]['enabled'] = true;
 				}
+			}
 
 			return json_encode($jsonform);
 		}
@@ -449,58 +470,38 @@ require_once __DIR__ . '/../libs/functions.php';
 				}
 			}
 
-			// need a counter to retry only 3 times and give up if we reached this.
-			private function ReloginRetriesReached(bool $reset = false)
-			{    
-				$counter = $this->ReadAttributeInteger('WTCounter');
-			   
-				if(($counter > 4) OR $reset == true){
-					$counter = $this->WriteAttributeInteger('WTCounter',1);
-					return true;
-				}
-
-				$this->WriteAttributeInteger('WTCounter',($counter + 1));
-				return false;
-			}
-
 			// Sequence to initiate relogin
+			// Strategie angelehnt an evcc (meter/tibber-pulse.go):
+			// Exponentielles Backoff 30s -> 60s -> 120s -> 240s -> 480s -> 600s (=10min),
+			// danach dauerhaft 600s. Kein harter Abbruch nach n Versuchen, damit sich das
+			// Modul nach Netzwerkstörungen selbst erholen kann.
 			public function ReloginSequence()
 			{
-				// if the Timer is greater than 0 the Reloingsequence started
+				// Wenn der Timer aktiv ist und ReloginSequence erneut getriggert wird,
+				// werten wir das als erfolgreich durchgeführten Relogin.
 				if ($this->GetTimerInterval('ReloginSequence') > 0)
 				{
-					// lets open the IO
-					//$this->OpenIO();
-					// stop the Reloginsequence
 					$this->SetTimerInterval('ReloginSequence', 0);
 					$this->SendDebug(__FUNCTION__, "relogin was occured", 0);
 					$this->LogMessage($this->Translate('relogin was occured'), KL_NOTIFY);
-					// reset counter to 0
-					$this->ReloginRetriesReached(true);
-					$this->SetStatus(102);	
-					$this->UpdateConfigurationForParent();						
+					// Backoff-Zähler zurücksetzen
+					$this->WriteAttributeInteger('WTCounter', 0);
+					$this->SetStatus(102);
+					$this->UpdateConfigurationForParent();
 				}
 				else
-				{	
-					// we dont receive data, now we stop tje Watchdog
+				{
+					// Watchdog stoppen, wir übernehmen das Reconnect-Timing
 					$this->SetTimerInterval('StartWatchdog', 0);
-					// use a random time between 60-120 sek
-					$randomtime = rand(60,120); 
-					// set the timer to start ourselve again
-					$this->SetTimerInterval('ReloginSequence', $randomtime * 1000);
-					$this->SendDebug(__FUNCTION__, "relogin sequence is initiated in " . $randomtime ." sec.", 0);
-					$this->LogMessage($this->Translate('relogin sequence is initiated in ') . $randomtime . $this->Translate('sec.'), KL_NOTIFY);
-					// count relogins, after three times we received a true and can abort it
-					$counter = $this->ReloginRetriesReached();
-					//$this->CloseIO();
-					if ($counter)
-					{
-						$this->SendDebug(__FUNCTION__, "relogin aborted, max retries reached", 0);
-						$this->LogMessage($this->Translate('relogin aborted, max retries reached'), KL_NOTIFY);
-						// to abort we stop this ReloginSequence and the status to the instance
-						$this->SetTimerInterval('ReloginSequence', 0);
-						$this->SetStatus(104);							
-					}
+
+					// Exponentielles Backoff: 30, 60, 120, 240, 480, 600, 600, ...
+					$attempt = $this->ReadAttributeInteger('WTCounter');
+					$delay = intval(min(600, 30 * pow(2, $attempt)));
+					$this->WriteAttributeInteger('WTCounter', $attempt + 1);
+
+					$this->SetTimerInterval('ReloginSequence', $delay * 1000);
+					$this->SendDebug(__FUNCTION__, "relogin sequence in ".$delay."s (attempt #".($attempt + 1).")", 0);
+					$this->LogMessage(sprintf($this->Translate('relogin in %d sec (attempt #%d)'), $delay, $attempt + 1), KL_NOTIFY);
 				}
 			}
 

@@ -36,6 +36,7 @@
             "Activate realtime stream":"aktiviere Realtime Stream",
             "relogin was occured":"Neuanmeldung wurde durchgeführt",
             "relogin sequence is initiated in ":"Neuanmeldung wird eingeleitet und gestartet in ",
+            "relogin in %d sec (attempt #%d)":"Neuanmeldung in %d Sekunden (Versuch #%d)",
             "sec.":"sek.",
             "did not receive data after three retries, connection closed!": "keine Daten nach 3 versuchen empfangen. Verbindung wurde geschlossen!",
             "Connection success": "Verbindung erfolgreich",
