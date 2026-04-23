@@ -18,6 +18,13 @@ trait TibberHelper
 
     private function CallTibber(string $request)
 		{
+			// Ohne Token gar nicht erst versuchen -> verhindert unnötige Statuswechsel
+			// während Instanz-Initialisierung (z.B. Create) oder bei leerer Konfiguration.
+			if ($this->ReadPropertyString('Token') == '') {
+				$this->SendDebug('Call_tibber_skipped', 'empty token', 0);
+				return false;
+			}
+
 			// Wenn wir aktuell im Ratelimit-Banfenster sind: ohne echten API-Call abbrechen.
 			$retryAfter = @$this->ReadAttributeInteger('ApiRetryAfter');
 			if ($retryAfter && time() < $retryAfter) {

@@ -51,7 +51,8 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyInteger('TibberID',rand(1000,9999));
 
 			$this->RegisterMessage(0, IPS_KERNELMESSAGE);
-			$this->GetRtApi();					//aktuelle Realtime API Adresse abrufen
+			// Hinweis: GetRtApi() gehört nach Symcon-Best-Practices nicht in Create().
+			// Der Call wird bei Bedarf aus ApplyChanges() heraus getätigt.
 
 			//register watchdogtimer
 			$this->RegisterTimer("ReloginSequence", 0, 'TIBRTV2_ReloginSequence($_IPS[\'TARGET\']);');
@@ -272,12 +273,18 @@ require_once __DIR__ . '/../libs/functions.php';
 			// Build Request Data
 			$request = '{ "query": "{viewer { websocketSubscriptionUrl }}"}';
 			$result = $this->CallTibber($request);
+			if (!$result) {
+				$this->SendDebug(__FUNCTION__, 'no result', 0);
+				return;
+			}
 			$this->SendDebug(__FUNCTION__, $result, 0);
-			if (!$result) return;		//Bei Fehler abbrechen
 
 			$result_ar = json_decode($result, true);
-			$this->WriteAttributeString('Api_RT',$result_ar['data']['viewer']['websocketSubscriptionUrl']);
-
+			if (!is_array($result_ar) || empty($result_ar['data']['viewer']['websocketSubscriptionUrl'])) {
+				$this->SendDebug(__FUNCTION__, 'unexpected payload', 0);
+				return;
+			}
+			$this->WriteAttributeString('Api_RT', (string)$result_ar['data']['viewer']['websocketSubscriptionUrl']);
 		}
 
 		private function ProcessReceivedPayload(array $payload){
