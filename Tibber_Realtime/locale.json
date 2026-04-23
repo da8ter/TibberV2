@@ -42,6 +42,7 @@
             "Connection success": "Verbindung erfolgreich",
             "Connection inactive": "Verbindung inaktiv",
             "Too many requests. Your IP is now temporarily banned for calling API for a few minutes.":"Zu viele Anfragen. Die IP ist temporär für einige minuten geblockt.",
+            "Bad request - the Tibber API rejected the query":"Ungültige Anfrage - die Tibber API hat die Query abgelehnt",
             "Reset Variablen": "Variablen zurücksetzen"
         }
     }

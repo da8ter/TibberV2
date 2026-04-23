@@ -1013,6 +1013,20 @@ require_once __DIR__ . '/../libs/functions.php';
 					}
 				}
 			}
+			// Sicherheitsnetz: steckt die Instanz in Status 205 (Ratelimit/Netzfehler),
+			// spätestens nach 30 Minuten einen erneuten Versuch planen, damit sich der
+			// Status automatisch auf 102 zurücksetzt, sobald die API wieder antwortet.
+			if ($this->GetStatus() == 205) {
+				$minRetry = $now + 1800;
+				// Ban-Fenster respektieren, falls es noch aktiv ist.
+				if ($apiRetryAfter && $apiRetryAfter + 5 > $minRetry) {
+					$minRetry = $apiRetryAfter + 5;
+				}
+				if ($time_new > $minRetry) {
+					$time_new = $minRetry;
+					$this->SendDebug(__FUNCTION__, 'status 205 -> force retry in '.($minRetry - $now).'s', 0);
+				}
+			}
 			// Sicherheitsnetz: nie schneller als in 60s erneut feuern
 			if ($time_new - $now < 60) { $time_new = $now + 60; }
 

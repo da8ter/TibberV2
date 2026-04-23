@@ -65,8 +65,8 @@ trait TibberHelper
 				return false;
 			}
 
-			// HTTP 429 oder Rate-Limit-Meldung im Body -> Ban-Fenster setzen
-			$isRateLimit = ($httpCode === 429) || (is_string($result) && strpos($result, 'Too many requests') !== false);
+			// HTTP 428 / 429 oder Rate-Limit-Meldung im Body -> Ban-Fenster setzen
+			$isRateLimit = ($httpCode === 429 || $httpCode === 428) || (is_string($result) && strpos($result, 'Too many requests') !== false);
 			if ($isRateLimit) {
 				$wait = 300; // Default 5 Min
 				if (isset($responseHeaders['retry-after'])) {
@@ -87,6 +87,22 @@ trait TibberHelper
 				return false;
 			}
 
+			// HTTP 401/403 -> Authentifizierung fehlgeschlagen
+			if ($httpCode === 401 || $httpCode === 403) {
+				$this->SendDebug('Call_tibber_auth_error', 'HTTP '.$httpCode, 0);
+				$this->SetStatus(210);
+				curl_close($curl);
+				return false;
+			}
+
+			// HTTP 400 -> Bad Request (z.B. Schema-Änderung der API). Kein Retry.
+			if ($httpCode === 400) {
+				$this->SendDebug('Call_tibber_bad_request', 'HTTP '.$httpCode.' body: '.(is_string($result) ? $result : ''), 0);
+				$this->SetStatus(206);
+				curl_close($curl);
+				return false;
+			}
+
 			// Server-Fehler 5xx -> kurzes Ban-Fenster, um Endlos-Retries zu vermeiden
 			if ($httpCode >= 500 && $httpCode < 600) {
 				$this->WriteAttributeInteger('ApiRetryAfter', time() + 600); // 10 Min
@@ -94,11 +110,6 @@ trait TibberHelper
 				$this->SetStatus(205);
 				curl_close($curl);
 				return false;
-			}
-
-			// Erfolgreicher HTTP-Aufruf -> Ban-Fenster zurücksetzen
-			if ($retryAfter) {
-				$this->WriteAttributeInteger('ApiRetryAfter', 0);
 			}
 
 			curl_close($curl);
@@ -109,19 +120,35 @@ trait TibberHelper
 				return false;
 			}
 
+			// GraphQL-Fehler (oft mit HTTP 200). Modern: errors[].extensions.code
 			if (array_key_exists('errors', $ar) && is_array($ar['errors']) && !empty($ar['errors'])){
-				switch ($ar['errors'][0]['message']){
-					case 'Context creation failed: invalid token':
-						$this->SetStatus(210);
-						return false;
-						break;
+				$firstErr = $ar['errors'][0];
+				$errMsg   = isset($firstErr['message']) ? (string)$firstErr['message'] : '';
+				$errCode  = isset($firstErr['extensions']['code']) ? (string)$firstErr['extensions']['code'] : '';
+				$this->SendDebug('Call_tibber_gql_error', 'code='.$errCode.' msg='.$errMsg, 0);
 
-					default:
-						return false;
-						break;
+				// Token-Probleme: sowohl alter Message-Text als auch neuer extensions.code
+				if ($errCode === 'UNAUTHENTICATED' || $errMsg === 'Context creation failed: invalid token') {
+					$this->SetStatus(210);
+					return false;
 				}
+				// Serverseitige Fehler -> kurzes Ban-Fenster wie HTTP 5xx
+				if ($errCode === 'INTERNAL_SERVER_ERROR') {
+					$this->WriteAttributeInteger('ApiRetryAfter', time() + 600);
+					$this->SetStatus(205);
+					return false;
+				}
+				return false;
 			}
+
 			if (array_key_exists('data', $ar)){
+				// Erfolgreicher Aufruf -> Ban-Fenster aufräumen und Status 205 -> 102 zurücksetzen
+				if ($retryAfter) {
+					$this->WriteAttributeInteger('ApiRetryAfter', 0);
+				}
+				if ($this->GetStatus() == 205) {
+					$this->SetStatus(102);
+				}
 				return $result;
 			}
 			return false;
