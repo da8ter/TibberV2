@@ -27,6 +27,8 @@ Behoben: TypeError bei leerem Preisarray (`Statistics(null)` nach Status 203), S
 
 Ebenfalls behoben (zweiter Durchgang): `ApplyChanges` wartet auf `KR_READY` (`IPS_KERNELSTARTED`), macht bei `InstanceActive = false` keine API-Aufrufe und überschreibt keinen Fehlerstatus; `Price_Variables_15m` wirkt nur mit `Enable_15m` (Formularfeld sonst unsichtbar); `Price_log` aus beendet nur das Archiv-Logging der Hilfsvariable (Variable und Chart bleiben); toter Code entfernt (`ProcessConsumptionData`, `CalcNewDay`, `CalcNewHour`, `hoursUntilTomorrowMidnight`, `GetFullUpdateMessageMANU`); keine `IPS_Sleep` je Variable mehr; Kachel-Startzustand mit `JSON_HEX_*`.
 
+Preislog (Forumsbericht 20.10.2026, Stundenlücke im Day-Ahead-Chart um Mitternacht): `LogAheadPrices` schrieb jeden Tag eine Null auf 00:00:01 des Folgetags – auf dieselbe Sekunde wie den echten 0-Uhr-Preis, weil `count($result_array) <= 48` durch die Nullplatzhalter immer wahr war. Jetzt werden nur echte Preise geloggt, und die Null kommt nur ohne Morgen-Preise als einzelner Endmarker.
+
 Bewusst gelassen: `Update_Ahead_Price_Data` läuft je Abruf zweimal (Preisabruf und aktueller Preis) und hält Kachel- und Vorschaudaten in Attributen – sie überleben so den Neustart und werden von `PriceArray()`/SmartStart gelesen.
 
 Mit dem öffentlichen Demo-Token von Tibber (pyTibber `DEMO_TOKEN`) gegen die echte API geprüft: 96 Viertelstundenpreise heute und morgen, alle Optionen, Status 102, Kachel gerendert.

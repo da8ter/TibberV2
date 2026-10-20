@@ -668,20 +668,25 @@ require_once __DIR__ . '/../libs/functions.php';
 
 			@AC_DeleteVariableData($ar_id, $varID, $start, $end);
 
+			// Nur echte Preise loggen. Die 24 Nullplatzhalter ohne Morgen-Preise bleiben weg; stattdessen
+			// EIN Nullwert um 00:00:01 des Folgetags, damit die Kurve dort endet statt den letzten Preis
+			// weiterzuziehen. Bis hierher lag die Null jeden Tag auf derselben Sekunde wie der echte
+			// 0-Uhr-Preis (die Bedingung count <= 48 war immer wahr) und riss im Chart eine Stundenluecke.
+			$tomorrowLogged = false;
 			foreach ($result_array as $res){
-				if (!isset($res['Ident'], $res['Price'])) { continue; }
+				if (!isset($res['Ident'], $res['Price']) || ($res['Level'] ?? '') === '') { continue; }
 				$ident = $res['Ident'];
-				$hour = intval(substr($ident, 9));
+				$hour = isset($res['start']) ? intval(date('G', intval($res['start']))) : intval(substr($ident, 9));
 				$dayFlag = substr($ident, 7, 1);
 				if ($dayFlag == '0'){
 					@AC_AddLoggedValues($ar_id, $varID, [[ 'TimeStamp' => mktime($hour, 0, 1, intval(date('m')), intval(date('d')-2), intval(date('Y'))), 'Value' => $res['Price'] ]]);
 				}
 				elseif ($dayFlag == '1'){
 					@AC_AddLoggedValues($ar_id, $varID, [[ 'TimeStamp' => mktime($hour, 0, 1, intval(date('m')), intval(date('d')-1), intval(date('Y'))), 'Value' => $res['Price'] ]]);
+					$tomorrowLogged = true;
 				}
 			}
-			$count = count($result_array);
-			if ($count <= self::HTML_Max_HourAhead){
+			if (!$tomorrowLogged){
 				@AC_AddLoggedValues($ar_id, $varID, [[ 'TimeStamp' => mktime(0, 0, 1, intval(date('m')), intval(date('d')-1), intval(date('Y'))), 'Value' => 0 ]]);
 			}
 			@AC_ReAggregateVariable($ar_id, $varID);
