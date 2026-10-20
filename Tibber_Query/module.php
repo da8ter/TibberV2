@@ -170,10 +170,6 @@ require_once __DIR__ . '/../libs/functions.php';
 		
 		public function GetPriceData()
 		{
-			if ($this->GetStatus() == 203)
-			{
-				$this->SetStatus(104);
-			}
 			// Build Request Data (Resolution abhängig vom globalen 15m-Schalter)
 			$resolution = $this->ReadPropertyBoolean('Enable_15m') ? 'QUARTER_HOURLY' : 'HOURLY';
 			$homeId = $this->ReadPropertyString('Home_ID');
@@ -190,15 +186,14 @@ require_once __DIR__ . '/../libs/functions.php';
 
 			$this->SendDebug("Price_Result", $result, 0);
 
+			// ProcessPriceData setzt Status 203 (keine Preise) bzw. 102/104 (Preise verarbeitet), rechnet die
+			// Statistik und aktualisiert die Vorschaudaten; hier bleibt nur der Zeitgeber.
 			$this->ProcessPriceData($result);
 			// Counter nur zurücksetzen, wenn T1-Preise wirklich geliefert wurden.
-			// Ansonsten zählt SetUpdateTimerPrices() die 5-Minuten-Polls bis zum Cap.
 			if ($this->ReadAttributeBoolean('EEX_Received')) {
 				$this->WriteAttributeInteger('PriceRetryCount', 0);
 			}
 			$this->SetUpdateTimerPrices();
-			$this->Statistics(json_decode($this->PriceArray(), true));
-			$this->Update_Ahead_Price_Data();
 
 			//$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
 
@@ -265,10 +260,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			}
 			if ($this->ReadAttributeString("Price_Array") != ''){
 				$prices = json_decode($this->ReadAttributeString("Price_Array"),true);
-				
-				$h = intval(date('G'));
-				$minNow = intval(date('i'));
-				$segNow = intval(floor($minNow / 15)); // 0..3
 				$usedQuarter = false;
 				// Prefer true quarter-hourly price if available and 15m mode is enabled
 				if ($this->ReadPropertyBoolean('Enable_15m')) {
@@ -301,24 +292,14 @@ require_once __DIR__ . '/../libs/functions.php';
 						}
 					}
 				}
-				// Fallback to hourly logic from Price_Array
+				// Fallback: Stundeneintrag, dessen Zeitfenster jetzt laeuft (nicht ueber den Ident: an
+				// Zeitumstellungstagen stimmt der Listenindex nicht mit der Stunde ueberein)
 				if (!$usedQuarter) {
+					$nowSec = time();
 					foreach ($prices as $wa_price){
-						$ident = isset($wa_price["Ident"]) ? $wa_price["Ident"] : '';
-						$day   = substr($ident,6,2); // 'T0' / 'T1'
-						if ($day !== 'T0') { continue; }
+						if (!isset($wa_price['start'], $wa_price['end'], $wa_price['Price'])) { continue; }
+						if ($nowSec < intval($wa_price['start']) || $nowSec >= intval($wa_price['end'])) { continue; }
 						$PRICE_LVL = 0;
-						if (strpos($ident, 'PT60M_') === 0){
-							$hourVal = intval(substr($ident,9));
-							if ($hourVal !== $h) { continue; }
-						}
-						elseif (strpos($ident, 'PT15M_') === 0){
-							$idxQ = intval(substr($ident,9)); // 0..95
-							$hourVal = intdiv($idxQ, 4);
-							$segVal  = $idxQ % 4;
-							if (!($hourVal === $h && $segVal === $segNow)) { continue; }
-						}
-						else { continue; }
 						$this->SetValue('act_price' , $wa_price["Price"]);
 						switch($wa_price["Level"])
 						{
@@ -455,7 +436,7 @@ require_once __DIR__ . '/../libs/functions.php';
 
 		}
 
-		private function ProcessPriceData(string $result)
+		private function ProcessPriceData(string $result): bool
 		{
 			$t1 = false;
 			$result_array = [];
@@ -466,7 +447,7 @@ require_once __DIR__ . '/../libs/functions.php';
 			if (empty($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"]))
 				{
 					$this->SetStatus(203);
-					return;
+					return false;
 				}
 		
 			// Detect resolution by step size (fallback to hourly).
@@ -515,10 +496,9 @@ require_once __DIR__ . '/../libs/functions.php';
                     ];
                 }
                 ksort($groups);
-                $idx = 0;
                 foreach ($groups as $g) {
                     $avgCt = ($g['cnt'] > 0) ? ($g['sumCt'] / $g['cnt']) : 0;
-                    $var = 'PT60M_T0_' . $idx;
+                    $var = 'PT60M_T0_' . intval(date('G', $g['start']));
                     $this->SetPriceVariables($var, [ 'total' => ($avgCt / 100), 'level' => $g['level'], 'startsAt' => date('c', $g['start']) ]);
                     $result_array[] = [
                         'Ident' => $var,
@@ -527,11 +507,11 @@ require_once __DIR__ . '/../libs/functions.php';
                         'start' => $g['start'],
                         'end'   => $g['start'] + 3600
                     ];
-                    $idx++;
                 }
             } else {
+                // Stunde aus der Startzeit, nicht aus dem Listenindex: an Zeitumstellungstagen hat der Tag 23 oder 25 Eintraege
                 foreach ($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"] AS $key => $wa_price) {
-                    $var = 'PT60M_T0_' . $key;
+                    $var = 'PT60M_T0_' . intval(date('G', strtotime($wa_price['startsAt'])));
                     $this->SetPriceVariables($var, $wa_price);
                     $result_array[] = [ 'Ident' => $var,
                                         'Price' => $wa_price['total'] * 100,
@@ -575,11 +555,10 @@ require_once __DIR__ . '/../libs/functions.php';
                     ];
                 }
                 ksort($groups);
-                $idx = 0;
                 foreach ($groups as $g) {
                     $t1 = true;
                     $avgCt = ($g['cnt'] > 0) ? ($g['sumCt'] / $g['cnt']) : 0;
-                    $var = 'PT60M_T1_' . $idx;
+                    $var = 'PT60M_T1_' . intval(date('G', $g['start']));
                     $this->SetPriceVariables($var, [ 'total' => ($avgCt / 100), 'level' => $g['level'], 'startsAt' => date('c', $g['start']) ]);
                     $result_array[] = [
                         'Ident' => $var,
@@ -588,7 +567,6 @@ require_once __DIR__ . '/../libs/functions.php';
                         'start' => $g['start'],
                         'end'   => $g['start'] + 3600
                     ];
-                    $idx++;
                 }
                 // store raw quarter-hourly list for visualization
                 $this->WriteAttributeString('Price_Array_15m', json_encode($rawQ));
@@ -596,7 +574,7 @@ require_once __DIR__ . '/../libs/functions.php';
                 // keep existing quarter-hour cache; do not clear to preserve continuity across midnight/transient issues
                 foreach ($prices["data"]["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"] AS $key => $wa_price) {
                     $t1 = true;
-                    $var = 'PT60M_T1_' . $key;
+                    $var = 'PT60M_T1_' . intval(date('G', strtotime($wa_price['startsAt'])));
                     $this->SetPriceVariables($var, $wa_price);
                     $result_array[] = [ 'Ident' => $var,
                                         'Price' => $wa_price['total'] * 100,
@@ -633,6 +611,9 @@ require_once __DIR__ . '/../libs/functions.php';
 				$this->LogAheadPrices($result_array);
 			}
 
+			// Preise verarbeitet: ein frueheres 203 (keine Preise) gilt nicht mehr
+			$this->SetStatus($this->ReadPropertyBoolean('InstanceActive') ? 102 : 104);
+			return true;
 		}
 
 		private function SetLogging()
@@ -800,7 +781,11 @@ require_once __DIR__ . '/../libs/functions.php';
                 if ($this->ReadPropertyBoolean('Enable_15m')){
                     $rawStr = $this->ReadAttributeString('Price_Array_15m');
                     $raw15 = $rawStr ? json_decode($rawStr, true) : [];
-                    $useRaw15 = is_array($raw15) && count($raw15) > 0;
+                    // Ein alter Cache (API lieferte zwischendurch nur Stunden) wuerde die Kachel leeren:
+                    // nur verwenden, wenn er noch Viertelstunden ab der aktuellen Stunde enthaelt
+                    $startHourNow = $nowSec - ($nowSec % 3600);
+                    $useRaw15 = is_array($raw15) && count($raw15) > 0
+                        && max(array_map(static fn($r) => intval($r['start'] ?? 0), $raw15)) >= $startHourNow;
                 }
 
                 if ($useRaw15){
@@ -1391,8 +1376,8 @@ require_once __DIR__ . '/../libs/functions.php';
 			if ($hasT0 && is_finite($minT0) && is_finite($maxT0)){
 				$this->SetValue('minprice_today', $minT0);
 				$this->SetValue('maxprice_today', $maxT0);
-				$minHourT0 = intval(substr($minIdentT0, 9));
-				$maxHourT0 = intval(substr($maxIdentT0, 9));
+				$minHourT0 = $this->HourOf($Data, $minIdentT0);
+				$maxHourT0 = $this->HourOf($Data, $maxIdentT0);
 				$this->SetValue('lowtime_today', $minHourT0);
 				$this->SetValue('hightime_today', $maxHourT0);
 				$this->SetValue('minmaxprice_today', $maxT0 - $minT0);
@@ -1401,8 +1386,8 @@ require_once __DIR__ . '/../libs/functions.php';
 			if ($hasT1 && is_finite($minT1) && is_finite($maxT1)){
 				$this->SetValue('minprice', $minT1);
 				$this->SetValue('maxprice', $maxT1);
-				$minHourT1 = intval(substr($minIdentT1, 9));
-				$maxHourT1 = intval(substr($maxIdentT1, 9));
+				$minHourT1 = $this->HourOf($Data, $minIdentT1);
+				$maxHourT1 = $this->HourOf($Data, $maxIdentT1);
 				$this->SetValue('lowtime', $minHourT1);
 				$this->SetValue('hightime', $maxHourT1);
 				$this->SetValue('minmaxprice', $maxT1 - $minT1);
@@ -1413,6 +1398,17 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->SetValue('no_level3', $lvlCountAll['NORMAL']);
 			$this->SetValue('no_level4', $lvlCountAll['EXPENSIVE']);
 			$this->SetValue('no_level5', $lvlCountAll['VERY_EXPENSIVE']);
+		}
+
+		/** Stunde eines Preiseintrags aus seiner Startzeit; ohne Startzeit aus dem Ident. */
+		private function HourOf(array $Data, string $ident): int
+		{
+			foreach ($Data as $row) {
+				if (($row['Ident'] ?? '') === $ident && isset($row['start'])) {
+					return intval(date('G', intval($row['start'])));
+				}
+			}
+			return intval(substr($ident, 9));
 		}
 
 		public function PriceArray()
@@ -1463,7 +1459,7 @@ require_once __DIR__ . '/../libs/functions.php';
                         $p = isset($row['price']) ? floatval($row['price']) : (isset($row['Price']) ? floatval($row['Price']) : null);
                         $lvl = isset($row['level']) ? $row['level'] : (isset($row['Level']) ? $row['Level'] : '');
                         $nd  = isset($row['nodata']) ? (bool)$row['nodata'] : false;
-                        if (is_finite($p) && !$nd && (!is_string($lvl) || $lvl !== '')) {
+                        if ($p !== null && is_finite($p) && !$nd && (!is_string($lvl) || $lvl !== '')) {
                             $vals[] = $p;
                         }
                     }
@@ -1481,12 +1477,13 @@ require_once __DIR__ . '/../libs/functions.php';
                         $result['price_avg'] = round(array_sum($filtered)/count($filtered), 2);
                     }
                 }
-                $result['price_cur']    = $AVGPriceVal[0];
                 // Provide exact current price from variable for frontend preference
                 try {
                     $act = $this->GetValue('act_price');
                     if (is_numeric($act)) { $result['act_price'] = round(floatval($act), 2); }
                 } catch (Exception $e) { /* ignore if not available */ }
+                // Ohne Stundenmittel (leere Vorschau) den aktuellen Preis zeigen statt eines fehlenden Index
+                $result['price_cur']    = $AVGPriceVal[0] ?? ($result['act_price'] ?? 0);
 			}
 			
 			            $result['BGCHour'] 			= sprintf('%06X', $this->ReadPropertyInteger("HTML_BGColorHour"));

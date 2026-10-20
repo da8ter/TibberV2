@@ -10,15 +10,21 @@ Projektwissen: **`.claude/docs/README.md`**. Offenes und Branchlage: `.claude/do
 - **`Tibber_Realtime/`** (Präfix `TIBRTV2`, Typ 3): Realtime-Stream über einen WebSocket-Client als Elterninstanz.
 - **`libs/functions.php`**: Trait `TibberHelper` (API-Aufruf, Fehler- und Rate-Limit-Behandlung, Statuscodes 201–210).
 - Altbestand: `extends IPSModule` mit `declare(strict_types=1)`, Variablenprofile `Tibber.price.*` für eigene Variablen, untypisierte Overrides. Bei `IPSModule` keine Parametertypen in Overrides nachrüsten (LSP-Fehler); Umbau auf Darstellungen nur mit Migrationsplan.
+- **Stundenpreise tragen die Stunde aus `startsAt`** im Ident (`PT60M_T0_<Stunde>`), nicht den Listenindex: an Zeitumstellungstagen hat der Tag 23 oder 25 Einträge (im Oktober zweimal `_2`). `SetActualPrice` und `Statistics` gehen über `start`/`end`, nicht über den Ident (Review 20.10.2026).
+- `ProcessPriceData()` setzt den Status selbst: 203 ohne heutige Preise, sonst 102/104 je `InstanceActive`; `GetPriceData()` kümmert sich nur um den Zeitgeber. Der 15-Minuten-Cache `Price_Array_15m` wird nur genutzt, wenn er die aktuelle Stunde noch abdeckt.
+- `CallTibber()` ist `protected`, damit der Prüfstand ihn durch eine feste Antwort ersetzen kann; der Authorization-Header wird im Debug maskiert.
 
 ## Prüfen
 
-Kein Prüfstand vorhanden.
+`tests/` ist nur lokal (`.git/info/exclude`): SDK-Attrappe für `IPSModule` in `tests/bootstrap.php`, `TibberProbe` liefert feste API-Antworten.
 
 ```bash
+php tests/query_test.php
 for f in */module.php libs/functions.php; do php -l "$f"; done
 for f in */*.json library.json; do python3 -m json.tool "$f" > /dev/null; done
 ```
+
+Gegenprobe gegen einen alten Stand: `TIBBER_MODULE=<Pfad zu module.php> php tests/query_test.php` (daneben muss `../libs/functions.php` liegen).
 
 ## Regeln
 

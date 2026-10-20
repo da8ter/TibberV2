@@ -21,6 +21,19 @@ Was `Testing` gegenüber `beta` bringt (Code, `libs/functions.php` und beide Mod
 - Realtime: Neuanmeldung mit exponentiellem Backoff (30 s, verdoppelt bis höchstens 600 s) und Versuchszähler.
 - README: Danksagung an die ursprünglichen Entwickler statt des alten Vorworts.
 
+## Review 20.10.2026 (Tibber_Query)
+
+Behoben: TypeError bei leerem Preisarray (`Statistics(null)` nach Status 203), Status blieb nach 203 auf 104, Token im Debug-Header, veralteter 15-Minuten-Cache leerte die Kachel (plus „Undefined array key 0“ bei `price_cur`), Stunde aus Listenindex statt `startsAt` (Zeitumstellung). Prüfstand `tests/query_test.php` (lokal) deckt die Fälle ab.
+
+Noch offen aus dem Review:
+
+- `ApplyChanges` macht bis zu drei API-Aufrufe und bis zu 240 × `IPS_Sleep`, ohne `KR_READY`-Prüfung und auch bei `InstanceActive = false`.
+- `Price_Variables_15m` ohne `Enable_15m` legt 192 Variablen an, die nie befüllt werden; das Formular zeigt die Abhängigkeit nicht.
+- `Price_log` aus lässt `Ahead_Price`, Archiv-Logging und Chart stehen; Statistik-Logging bleibt ebenfalls aktiv.
+- Toter Code: `ProcessConsumptionData` (switch ohne break), `CalcNewDay`, `CalcNewHour`, `hoursUntilTomorrowMidnight`, `GetFullUpdateMessageMANU` (verpackt JSON in ein Array).
+- `Update_Ahead_Price_Data` läuft je Preisabruf bis zu dreimal und schreibt jedes Mal Attribute (settings.json); `SetPriceVariables`/`RegisterVariables` schlafen je Variable.
+- Kachel-Startzustand ohne `JSON_HEX_TAG` (derzeit nur Zahlen/Enums).
+
 ## Offen
 
 - Arbeitsstand liegt seit 08.10.2026 in `symcon-beta` (= `Testing` + Projektgedächtnis, ohne die alte `.bak`-Datei); `beta` (2.4.7) und `main` (2.4.4) hängen zurück. Branchrolle von `Testing` festlegen.
@@ -28,4 +41,4 @@ Was `Testing` gegenüber `beta` bringt (Code, `libs/functions.php` und beide Mod
 - Altbestand: `extends IPSModule`, Variablenprofile (`Tibber.price.cent`, `Tibber.price.level`, `~TextBox` …) für eigene Variablen, untypisierte Signaturen. Ein Umbau auf `IPSModuleStrict` mit Darstellungen ändert sichtbare Variablen bestehender Installationen und braucht deshalb einen Migrationsplan.
 - `docs/preview.png` wird von keiner README eingebunden.
 
-Stand: geprüft gegen den Code am 08.10.2026
+Stand: geprüft gegen den Code am 20.10.2026
