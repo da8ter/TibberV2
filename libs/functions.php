@@ -16,7 +16,15 @@ trait TibberHelper
         $this->ReloadForm();
     }
 
-    private function CallTibber(string $request)
+    /** Authorization-Header fuer das Debug maskieren: der Token gehoert nicht in Konsole oder Debug-Dateien. */
+    private static function MaskAuthorization(array $headers): array
+    {
+        return array_map(static function ($h) {
+            return is_string($h) && stripos($h, 'Authorization:') === 0 ? 'Authorization: Bearer ****' : $h;
+        }, $headers);
+    }
+
+    protected function CallTibber(string $request)
 		{
 			// Ohne Token gar nicht erst versuchen -> verhindert unnötige Statuswechsel
 			// während Instanz-Initialisierung (z.B. Create) oder bei leerer Konfiguration.
@@ -34,7 +42,7 @@ trait TibberHelper
 			}
 
 			$headers =  array('Authorization: Bearer '.$this->ReadPropertyString('Token'),  "Content-type: application/json");
-			$this->SendDebug('HEADER', json_encode($headers), 0);
+			$this->SendDebug('HEADER', json_encode(self::MaskAuthorization($headers)), 0);
 			$curl = curl_init();
 
 			// Response-Header mitlesen für Retry-After
