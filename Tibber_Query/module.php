@@ -119,7 +119,8 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->RegisterPropertyBoolean("HTML_Hour_WriteMode", self::HTML_Hour_WriteMode);
 
 
-			$this->SetVisualizationType(1);
+			// HTML-Kachel; wo die Visu es anbietet auch maximiert (aeltere Versionen kennen die Konstante nicht)
+			$this->SetVisualizationType(defined('INSTANCE_VISUALIZATION_TYPE_HTML_FULLSCREEN') ? INSTANCE_VISUALIZATION_TYPE_HTML_FULLSCREEN : 1);
 
 			//--- Register Timer
 			$this->RegisterTimer("UpdateTimerPrice", 0, 'TIBV2_GetPriceData($_IPS[\'TARGET\']);');
