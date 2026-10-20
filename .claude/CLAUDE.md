@@ -13,6 +13,8 @@ Projektwissen: **`.claude/docs/README.md`**. Offenes und Branchlage: `.claude/do
 - **Stundenpreise tragen die Stunde aus `startsAt`** im Ident (`PT60M_T0_<Stunde>`), nicht den Listenindex: an Zeitumstellungstagen hat der Tag 23 oder 25 Einträge (im Oktober zweimal `_2`). `SetActualPrice` und `Statistics` gehen über `start`/`end`, nicht über den Ident (Review 20.10.2026).
 - `ProcessPriceData()` setzt den Status selbst: 203 ohne heutige Preise, sonst 102/104 je `InstanceActive`; `GetPriceData()` kümmert sich nur um den Zeitgeber. Der 15-Minuten-Cache `Price_Array_15m` wird nur genutzt, wenn er die aktuelle Stunde noch abdeckt.
 - `CallTibber()` ist `protected`, damit der Prüfstand ihn durch eine feste Antwort ersetzen kann; der Authorization-Header wird im Debug maskiert.
+- `ApplyChanges` wartet auf `KR_READY`, macht bei inaktiver Instanz keine API-Aufrufe und lässt einen Fehlerstatus (≥ 200) aus dem Abruf stehen. `Price_Variables_15m` gilt nur zusammen mit `Enable_15m`. `Price_log` aus beendet nur das Logging; Variable `Ahead_Price` und Chart bleiben (kein Datenverlust, Chart-Verweis bleibt gültig).
+- **Echte API ohne eigenes Konto:** Tibber veröffentlicht einen Demo-Token (pyTibber `tibber/const.py`, `DEMO_TOKEN`; Demo-Konto mit Viertelstundenpreisen und Realtime). Nie ins Repo, nur im Docker (siehe `CLAUDE.local.md`).
 
 ## Prüfen
 

@@ -25,14 +25,11 @@ Was `Testing` gegenüber `beta` bringt (Code, `libs/functions.php` und beide Mod
 
 Behoben: TypeError bei leerem Preisarray (`Statistics(null)` nach Status 203), Status blieb nach 203 auf 104, Token im Debug-Header, veralteter 15-Minuten-Cache leerte die Kachel (plus „Undefined array key 0“ bei `price_cur`), Stunde aus Listenindex statt `startsAt` (Zeitumstellung). Prüfstand `tests/query_test.php` (lokal) deckt die Fälle ab.
 
-Noch offen aus dem Review:
+Ebenfalls behoben (zweiter Durchgang): `ApplyChanges` wartet auf `KR_READY` (`IPS_KERNELSTARTED`), macht bei `InstanceActive = false` keine API-Aufrufe und überschreibt keinen Fehlerstatus; `Price_Variables_15m` wirkt nur mit `Enable_15m` (Formularfeld sonst unsichtbar); `Price_log` aus beendet nur das Archiv-Logging der Hilfsvariable (Variable und Chart bleiben); toter Code entfernt (`ProcessConsumptionData`, `CalcNewDay`, `CalcNewHour`, `hoursUntilTomorrowMidnight`, `GetFullUpdateMessageMANU`); keine `IPS_Sleep` je Variable mehr; Kachel-Startzustand mit `JSON_HEX_*`.
 
-- `ApplyChanges` macht bis zu drei API-Aufrufe und bis zu 240 × `IPS_Sleep`, ohne `KR_READY`-Prüfung und auch bei `InstanceActive = false`.
-- `Price_Variables_15m` ohne `Enable_15m` legt 192 Variablen an, die nie befüllt werden; das Formular zeigt die Abhängigkeit nicht.
-- `Price_log` aus lässt `Ahead_Price`, Archiv-Logging und Chart stehen; Statistik-Logging bleibt ebenfalls aktiv.
-- Toter Code: `ProcessConsumptionData` (switch ohne break), `CalcNewDay`, `CalcNewHour`, `hoursUntilTomorrowMidnight`, `GetFullUpdateMessageMANU` (verpackt JSON in ein Array).
-- `Update_Ahead_Price_Data` läuft je Preisabruf bis zu dreimal und schreibt jedes Mal Attribute (settings.json); `SetPriceVariables`/`RegisterVariables` schlafen je Variable.
-- Kachel-Startzustand ohne `JSON_HEX_TAG` (derzeit nur Zahlen/Enums).
+Bewusst gelassen: `Update_Ahead_Price_Data` läuft je Abruf zweimal (Preisabruf und aktueller Preis) und hält Kachel- und Vorschaudaten in Attributen – sie überleben so den Neustart und werden von `PriceArray()`/SmartStart gelesen.
+
+Mit dem öffentlichen Demo-Token von Tibber (pyTibber `DEMO_TOKEN`) gegen die echte API geprüft: 96 Viertelstundenpreise heute und morgen, alle Optionen, Status 102, Kachel gerendert.
 
 ## Offen
 

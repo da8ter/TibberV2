@@ -3,7 +3,8 @@
     [
         {   "type": "CheckBox",
             "name": "Enable_15m",
-            "caption": "Enable 15-minute prices"
+            "caption": "Enable 15-minute prices",
+            "onChange": "IPS_RequestAction($id, 'ShowPriceVariables15m', $Enable_15m);"
         },
         {   "type": "CheckBox",
             "name": "DemoMode",
@@ -47,7 +48,7 @@
                     {   "type": "CheckBox",
                         "name": "Price_Variables_15m",
                         "caption": "Price - create variables per 15 minutes (96 for current day & 96 for day ahead day)",
-                        "visible": true
+                        "visible": false
                     },
                     {   "type": "CheckBox",
                         "name": "Statistics",

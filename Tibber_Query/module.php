@@ -138,6 +138,12 @@ require_once __DIR__ . '/../libs/functions.php';
 			//Never delete this line!
 			parent::ApplyChanges();
 
+			// Kein API-Aufruf vor dem Kernelstart: nach IPS_KERNELSTARTED erneut durchlaufen
+			if (IPS_GetKernelRunlevel() !== KR_READY) {
+				$this->RegisterMessage(0, IPS_KERNELSTARTED);
+				return false;
+			}
+
 			if ($this->ReadPropertyString("Token") == ''){
 				$this->SetStatus(201); // Kein Token
             	return false;
@@ -150,22 +156,38 @@ require_once __DIR__ . '/../libs/functions.php';
 
 			$this->RegisterProfiles();
 			$this->RegisterVariables();
+
+			if (!$this->ReadPropertyBoolean("InstanceActive"))
+			{
+				// Inaktiv: keine API-Aufrufe, keine Zeitgeber
+				$this->SetTimerInterval("UpdateTimerPrice", 0);
+				$this->SetTimerInterval("UpdateTimerActPrice", 0);
+				$this->SetStatus(104);
+				$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
+				$this->Reload();
+				return true;
+			}
+
 			$this->SetValue('RT_enabled',$this->CheckRealtimeAvailable());
 			$this->GetPriceData();
 			$this->SetActualPrice();
-			
-			if ($this->ReadPropertyBoolean("InstanceActive"))
+
+			// Ein Fehlerstatus aus dem Abruf (203, 205, 206, 210) bleibt stehen; sonst aktiv
+			if ($this->GetStatus() < 200)
 			{
-				$this->SetStatus(102); // instanz aktiveren
-			}
-			else
-			{
-				$this->SetStatus(104); // instanz deaktiveren
+				$this->SetStatus(102);
 			}
 			// Tile Visu update
 			$this->UpdateVisualizationValue($this->GetFullUpdateMessage());
 			$this->Reload();
+			return true;
+		}
 
+		public function MessageSink($TimeStamp, $SenderID, $Message, $Data)
+		{
+			if ($Message == IPS_KERNELSTARTED) {
+				$this->ApplyChanges();
+			}
 		}
 		
 		public function GetPriceData()
@@ -321,6 +343,16 @@ require_once __DIR__ . '/../libs/functions.php';
 			}
 		}
 
+		/** Ein Formularfeld (beliebig verschachtelt) um einen Schluessel ergaenzen. */
+		private function SetFormField(array &$elements, string $name, string $key, $value): void
+		{
+			foreach ($elements as &$el) {
+				if (!is_array($el)) { continue; }
+				if (($el['name'] ?? '') === $name) { $el[$key] = $value; }
+				if (isset($el['items']) && is_array($el['items'])) { $this->SetFormField($el['items'], $name, $key, $value); }
+			}
+		}
+
 		public function GetConfigurationForm()
 		{
 			$jsonform = json_decode(file_get_contents(__DIR__."/form.json"), true);
@@ -350,6 +382,9 @@ require_once __DIR__ . '/../libs/functions.php';
 					$el['visible'] = true;
 				}
 			}
+			unset($el);
+			// 15-Minuten-Variablen nur anbieten, wenn 15-Minuten-Preise aktiv sind
+			$this->SetFormField($jsonform['elements'], 'Price_Variables_15m', 'visible', $this->ReadPropertyBoolean('Enable_15m'));
 
 			// Colorsettings-Panel finden und Sichtbarkeit von HTML_FontColorHourDefault setzen
 			foreach ($jsonform['elements'] as $idx => &$el) {
@@ -388,52 +423,7 @@ require_once __DIR__ . '/../libs/functions.php';
 			if (!$result) return;		//Bei Fehler abbrechen
 
 			$this->SendDebug("Consumption_Result", $result, 0);
-			//$this->process_consumption_data($result, $timing);
 			return $result;
-		}
-
-		private function ProcessConsumptionData(string $result, string $timing)
-		{
-			$log_consum = '';
-			$log_price = '';
-			$log_costs = '';
-			$con = json_decode($result, true);
-
-			switch ($timing){
-				case "HOURLY":	
-					$log_consum = 'hourly_consumption';	
-					$log_price =  'hourly_price';	
-					$log_costs =  'hourly_costs';	
-				case "DAILY":	
-					$log_consum = 'daily_consumption';
-					$log_price = 'daily_price';
-					$log_costs = 'daily_costs';	
-				case "WEEKLY":	
-					$log_consum = 'weekly_consumption';
-					$log_price = 'weekly_price';
-					$log_costs = 'weekly_costs';	
-				case "MONTHLY":	
-					$log_consum = 'monthly_consumption';
-					$log_price = 'monthly_price';
-					$log_costs = 'monthly_costs';	
-				case "ANNUAL":	
-					$log_consum = 'annual_consumption';
-					$log_price = 'annual_price';
-					$log_costs = 'annual_costs';	
-			}
-
-			foreach ($con["data"]["viewer"]["home"]["consumption"]["nodes"] AS $key => $wa_con) {
-				
-				$start = strtotime($wa_con["from"]);
-				$end = strtotime($wa_con["from"]) - 1; 
-				// Consumption Update
-					AC_DeleteVariableData($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent($log_consum), $start, $end);
-					$last_log= AC_GetLoggedValues($this->ReadAttributeInteger("ar_handler"),$this->GetIDForIdent($log_consum),$start - 1, $start -1, 1 )[0]['Value'];
-					if ($last_log != ''){ }
-				AC_AddLoggedValues($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent($log_consum), [[ 'TimeStamp' => $end, 'Value' => $wa_con["consumption"] ]]);	
-			}
-				AC_ReAggregateVariable($this->ReadAttributeInteger("ar_handler"), $this->GetIDForIdent($log_consum));	
-
 		}
 
 		private function ProcessPriceData(string $result): bool
@@ -919,7 +909,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			if (preg_match('/^PT15M_T([01])_(\d+)$/', $var)){
 				if ($this->ReadPropertyBoolean('Price_Variables_15m')){
 					$this->setvalue($var, $priceCt);
-					IPS_Sleep(5);
 				}
 				return;
 			}
@@ -927,7 +916,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			if (preg_match('/^PT60M_T([01])_(\d+)$/', $var, $m)){
 				if ($this->ReadPropertyBoolean('Price_Variables')){
 					$this->setvalue($var, $priceCt);
-					IPS_Sleep(5);
 				}
 				return;
 			}
@@ -939,7 +927,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			if (preg_match('/^PT15M_T([01])_(\d+)$/', $var)){
 				if ($this->ReadPropertyBoolean('Price_Variables_15m')){
 					$this->setvalue($var, 0 );
-					IPS_Sleep(5);
 				}
 				return;
 			}
@@ -947,7 +934,6 @@ require_once __DIR__ . '/../libs/functions.php';
 			if (preg_match('/^PT60M_T([01])_(\d+)$/', $var, $m)){
 				if ($this->ReadPropertyBoolean('Price_Variables')){
 					$this->setvalue($var, 0 );
-					IPS_Sleep(5);
 				}
 				return;
 			}
@@ -1073,39 +1059,14 @@ require_once __DIR__ . '/../libs/functions.php';
 			$this->SendDebug('Act-Price Timer - Run in sec', $timer_new ,0);
 		}
 
-		private function CalcNewDay()
-		{
-			date_default_timezone_set('Europe/Berlin');
-			$date_new = mktime(0, 0, 01, intval( date("m") ) , intval(date("d")+1), intval(date("Y")));
-			$act_date = time();
-			return $date_new - $act_date;
-		}
-
-		private function CalcNewHour()
-		{
-			date_default_timezone_set('Europe/Berlin');
-			$h = date('G');
-			if ($h <23){
-				$h = date('G') +1;
-				$date_new = mktime($h, 0, 01, intval( date("m") ) , intval(date("d")), intval(date("Y")));
-			}
-			else{
-				$date_new = time() + 3600;
-			}
-			$act_date = time();
-			return $date_new - $act_date;
-		}
-		
 		private function RegisterVariables()
 		{
 			if ($this->ReadPropertyBoolean('Price_Variables')){
 				for ($i = 0; $i <= 23; $i++) {
 					$this->MaintainVariable("PT60M_T0_" . $i, $this->Translate('Today')." ". $i ." ". $this->Translate('to')." ". ($i + 1) . " ". $this->Translate('h'), 2, "Tibber.price.cent", 300 + $i, true);
-                    IPS_Sleep(10);
 				}
 				for ($i = 0; $i <= 23; $i++) {
 					$this->MaintainVariable("PT60M_T1_" . $i, $this->Translate('Tomorrow')." ". $i ." ". $this->Translate('to')." ". ($i + 1) . " ". $this->Translate('h'), 2, "Tibber.price.cent", 330 + $i, true);
-                    IPS_Sleep(10);
 				}
 			} 
 			else
@@ -1115,19 +1076,18 @@ require_once __DIR__ . '/../libs/functions.php';
 					if (@$this->GetIDForIdent("PT60M_T0_" . $i))
 					{
 						$this->MaintainVariable("PT60M_T0_" . $i, "", 2, "", 300 + $i, false);
-						IPS_Sleep(10);
 					}
 				}
 				for ($i = 0; $i <= 23; $i++) {
 					if (@$this->GetIDForIdent("PT60M_T1_" . $i))
 					{
 						$this->MaintainVariable("PT60M_T1_" . $i, "", 2, "", 330 + $i, false);
-						IPS_Sleep(10);
 					}
 				}
 			}
-			// 15-minute variables (optional)
-			if ($this->ReadPropertyBoolean('Price_Variables_15m')){
+			// 15-minute variables (optional) – nur sinnvoll, wenn die Abfrage Viertelstunden liefert (Enable_15m);
+			// sonst entstuenden 192 Variablen, die nie befuellt werden
+			if ($this->ReadPropertyBoolean('Price_Variables_15m') && $this->ReadPropertyBoolean('Enable_15m')){
 				// Today (T0)
 				for ($i = 0; $i <= 95; $i++) {
 					$h = intdiv($i, 4);
@@ -1137,7 +1097,6 @@ require_once __DIR__ . '/../libs/functions.php';
 					$mEnd = $m1 % 60;               // minute rollover
 					$label = sprintf('%s %02d:%02d %s %02d:%02d', $this->Translate('Today'), $h, $m0, $this->Translate('to'), $hEnd, $mEnd);
 					$this->MaintainVariable("PT15M_T0_" . $i, $label, 2, "Tibber.price.cent", 400 + $i, true);
-                    IPS_Sleep(10);
 				}
 				// Tomorrow (T1)
 				for ($i = 0; $i <= 95; $i++) {
@@ -1148,7 +1107,6 @@ require_once __DIR__ . '/../libs/functions.php';
 					$mEnd = $m1 % 60;
 					$label = sprintf('%s %02d:%02d %s %02d:%02d', $this->Translate('Tomorrow'), $h, $m0, $this->Translate('to'), $hEnd, $mEnd);
 					$this->MaintainVariable("PT15M_T1_" . $i, $label, 2, "Tibber.price.cent", 500 + $i, true);
-                    IPS_Sleep(10);
 				}
 			}
 			else
@@ -1173,15 +1131,23 @@ require_once __DIR__ . '/../libs/functions.php';
 			else
 			{
 				$this->MaintainVariable('Ahead_Price_Data_60m', "", 3, "~TextBox", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable('Ahead_Price_Data_15m', "", 3, "~TextBox", 0, false);
-				IPS_Sleep(10);
 			}
 
 			// Day-ahead helper + logging to archive
 			if ($this->ReadPropertyBoolean('Price_log') == true){
 				$this->RegisterVariableFloat("Ahead_Price", $this->Translate('day ahead price helper variable'), 'Tibber.price.cent', 0);
 				$this->SetLogging();
+			}
+			else
+			{
+				// Abgeschaltet: nur das Archiv-Logging beenden. Variable und Chart bleiben, damit beim
+				// Wiedereinschalten Verlauf und Chart-Verweis erhalten sind.
+				$varID = @$this->GetIDForIdent('Ahead_Price');
+				$ar_id = $this->ReadAttributeInteger('ar_handler');
+				if ($varID && $ar_id > 0 && @AC_GetLoggingStatus($ar_id, $varID)) {
+					@AC_SetLoggingStatus($ar_id, $varID, false);
+				}
 			}
 
 			// Statistic
@@ -1243,35 +1209,20 @@ require_once __DIR__ . '/../libs/functions.php';
 			else
 			{
 				$this->MaintainVariable("minprice", "", 2, "Tibber.price.cent", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("maxprice", "", 2, "Tibber.price.cent", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("minmaxprice", "", 2, "Tibber.price.cent", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("lowtime", "", 1, "Tibber.price.hour", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("hightime", "", 1, "Tibber.price.hour", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("minprice_today", "", 2, "Tibber.price.cent", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("maxprice_today", "", 2, "Tibber.price.cent", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("minmaxprice_today", "", 2, "Tibber.price.cent", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("lowtime_today", "", 1, "Tibber.price.hour", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("hightime_today", "", 1, "Tibber.price.hour", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("no_level1", "", 1, "", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("no_level2", "", 1, "", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("no_level3", "", 1, "", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("no_level4", "", 1, "", 0, false);
-				IPS_Sleep(10);
 				$this->MaintainVariable("no_level5", "", 1, "", 0, false);
-				IPS_Sleep(10);
 			}
 			
 		}
@@ -1321,6 +1272,9 @@ require_once __DIR__ . '/../libs/functions.php';
 				break;
 				case "ShowDefaultFontColorHour":
 					$this->UpdateFormField("HTML_FontColorHourDefault", "visible", $Value);
+				break;
+				case "ShowPriceVariables15m":
+					$this->UpdateFormField("Price_Variables_15m", "visible", (bool)$Value);
 				break;
 				case "SetGradientOptimization":
 					// Forward toggle state to the tile visualization without forcing a full reload
@@ -1434,7 +1388,8 @@ require_once __DIR__ . '/../libs/functions.php';
 
 		public function GetVisualizationTile()
         {
-			$initialHandling = '<script>handleMessage(' . json_encode($this->GetFullUpdateMessage()) . ')</script>';
+			// JSON_HEX_*: ein "</script>" in einem Text (z. B. Level aus der API) darf den Block nicht beenden
+			$initialHandling = '<script>handleMessage(' . json_encode($this->GetFullUpdateMessage(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ')</script>';
 
             // Add static HTML content from file to make editing easier
             $module = file_get_contents(__DIR__ . '/module.html');
@@ -1554,29 +1509,6 @@ require_once __DIR__ . '/../libs/functions.php';
             //$result['Ahead_Price_Data'] = json_decode($this->GetValue("Ahead_Price_Data"),true);
 
 			return json_encode($result) ;
-		}
-
-        private function hoursUntilTomorrowMidnight(): int
-   		{
-			// Beginn der aktuellen Stunde
-			$currentHourStart = (new DateTime())->setTime((int)date('H'), 0, 0);
-
-			// übermorgen Mitternacht
-			$overTomorrowMidnight = new DateTime('+2 days midnight');
-
-			// Berechnung der Stunden bis übermorgen Mitternacht
-			$interval = $currentHourStart->diff($overTomorrowMidnight);
-			return ($interval->days * 24) + $interval->h;
-    	}
-		
-		public function GetFullUpdateMessageMANU()
-		{
-			//funktion um die Kachelvisu besser testen zu können.
-			$result[] = $this->GetFullUpdateMessage();
-
-			$this->UpdateVisualizationValue(json_encode($result));
-			$this->SendDebug(__FUNCTION__,'Update Manu: '.json_encode($result),0);
-			return ;
 		}
 
 		// just reload location
