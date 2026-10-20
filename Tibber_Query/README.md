@@ -1,4 +1,7 @@
 # Tibber
+
+![Tibber V.2 — Preiskachel](https://raw.githubusercontent.com/da8ter/images/main/Tibber%20V2%20Kachel.png)
+
 Mit diesem Modul können die Informationen abgerufen werden welche von der Tibber Query API bereitgestellt werden.
 
 ### Inhaltsverzeichnis

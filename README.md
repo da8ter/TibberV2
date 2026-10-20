@@ -1,4 +1,6 @@
 ### IP-Symcon Modul Library: Tibber V.2 
+
+![Tibber V.2 — Preiskachel](https://raw.githubusercontent.com/da8ter/images/main/Tibber%20V2%20Kachel.png)
 ## Dokumentation
 
 **Inhaltsverzeichnis**
